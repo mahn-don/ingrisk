@@ -1,2 +1,25 @@
 # Pseudo-words removed by hand. One word per line; "#" starts a comment.
 # Words listed here are never output by `npm run content:prepare`; replacements are generated.
+# Phase 1 review (2026-10-02)
+toprope
+eldon
+thepet
+thurush
+stringock
+earthast
+hourlon
+hourgule
+skinide
+gridow
+clipond
+# Replacements that start with a real word of 4+ letters (word-list or NGSL)
+choupot
+hishey
+hemplate
+snogrey
+doobane
+flabule
+fronthen
+tounky
+fountet
+torthot

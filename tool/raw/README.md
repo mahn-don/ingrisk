@@ -25,8 +25,7 @@ Headwords are lowercased, which restores it.
   - https://downloads.tatoeba.org/exports/per_language/eng/eng_sentences.tsv.bz2
   - https://downloads.tatoeba.org/exports/per_language/vie/vie_sentences.tsv.bz2
   - https://downloads.tatoeba.org/exports/per_language/eng/eng-vie_links.tsv.bz2
-- Export date shown on the download server: **not recorded** (the server was not reachable from
-  the build container). The files were downloaded on or shortly before 2026-10-02.
+- Export: the weekly export dated **2026-09-26**.
 - License: CC BY 2.0 FR (https://creativecommons.org/licenses/by/2.0/fr/); some sentences are CC0.
 - Attribution: sentences and translations from Tatoeba (https://tatoeba.org), by its contributors.
 
