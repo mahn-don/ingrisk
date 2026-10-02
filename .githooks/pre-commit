@@ -1,0 +1,32 @@
+#!/bin/sh
+# Pre-commit guardrails: block env files, database files and secrets.
+# Enable with: git config core.hooksPath .githooks
+set -eu
+
+blocked=$(git diff --cached --name-only --diff-filter=ACMR | while IFS= read -r file; do
+	case "$(basename "$file")" in
+		.env.example) ;;
+		.env | .env.* | *.db | *.db-*) printf '  %s\n' "$file" ;;
+	esac
+done)
+
+if [ -n "$blocked" ]; then
+	echo "pre-commit: refusing to commit env or database files:" >&2
+	echo "$blocked" >&2
+	echo "Unstage them with: git restore --staged <file>" >&2
+	exit 1
+fi
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+	echo "pre-commit: gitleaks is not installed, so the commit is blocked." >&2
+	echo "Install it, then commit again:" >&2
+	echo "  macOS:  brew install gitleaks" >&2
+	echo "  Linux:  download a release from https://github.com/gitleaks/gitleaks/releases" >&2
+	echo "  Go:     go install github.com/zricethezav/gitleaks/v8@latest" >&2
+	exit 1
+fi
+
+if ! gitleaks git --pre-commit --staged --redact --no-banner --verbose; then
+	echo "pre-commit: gitleaks found a possible secret in the staged changes. Remove it and commit again." >&2
+	exit 1
+fi
