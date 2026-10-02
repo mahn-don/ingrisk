@@ -5,7 +5,7 @@ commit per phase, `npm run verify` green before committing.
 
 - [x] **Phase 0 — Scaffold and guardrails:** a clean, verified skeleton showing a Vietnamese string from `messages/vi.ts`, with a hook that blocks committing secrets.
 - [x] **Phase 1 — Content data preparation:** a re-runnable `tool/` script producing the NGSL, Tatoeba EN–VI and pseudo-word assets in `src/lib/server/content/` (no app code). Pseudo-words reviewed by hand.
-- [ ] **Phase 2 — Data layer:** Drizzle schema per Part II §3, migrations, intent-level repositories and in-memory SQLite tests.
+- [x] **Phase 2 — Data layer:** Drizzle schema per Part II §3, migrations, intent-level repositories and in-memory SQLite tests.
 - [ ] **Phase 3 — Spaced-repetition engine:** a thin `ts-fsrs` wrapper with `review()`, review logging, due-card queries and interval tests.
 - [ ] **Phase 4 — LLM provider layer:** an `LlmClient` with OpenAI-compatible and Anthropic adapters, retry/fallback, and divergence + key-leak tests.
 - [ ] **Phase 5 — Generation and validation pipeline:** content import, generators, Zod + rule validation, and the secret-guarded prefetch endpoint.

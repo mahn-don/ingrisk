@@ -1,0 +1,36 @@
+// Intent-level data access. Callers use these functions, never raw queries.
+import { getDb, type Db } from '../client.ts';
+import { cacheRepo } from './cache.ts';
+import { cardsRepo } from './cards.ts';
+import { grammarTopicsRepo } from './grammar-topics.ts';
+import { profileRepo } from './profile.ts';
+import { providersRepo } from './providers.ts';
+import { reviewLogsRepo } from './review-logs.ts';
+import { sessionsRepo } from './sessions.ts';
+import { settingsRepo } from './settings.ts';
+import { writingRepo } from './writing.ts';
+
+/** All repositories bound to one database (tests pass an in-memory one). */
+export function createRepositories(db: Db) {
+	return {
+		settings: settingsRepo(db),
+		profile: profileRepo(db),
+		providers: providersRepo(db),
+		cards: cardsRepo(db),
+		reviewLogs: reviewLogsRepo(db),
+		cache: cacheRepo(db),
+		writing: writingRepo(db),
+		sessions: sessionsRepo(db),
+		grammarTopics: grammarTopicsRepo(db)
+	};
+}
+
+export type Repositories = ReturnType<typeof createRepositories>;
+
+let repositories: Repositories | undefined;
+
+/** Repositories bound to the app database (opened and migrated on first use). */
+export function repos(): Repositories {
+	repositories ??= createRepositories(getDb());
+	return repositories;
+}
