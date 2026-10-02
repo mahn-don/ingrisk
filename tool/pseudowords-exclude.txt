@@ -1,0 +1,2 @@
+# Pseudo-words removed by hand. One word per line; "#" starts a comment.
+# Words listed here are never output by `npm run content:prepare`; replacements are generated.

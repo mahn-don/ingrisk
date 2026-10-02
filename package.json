@@ -4,7 +4,7 @@
 	"version": "0.0.1",
 	"type": "module",
 	"engines": {
-		"node": ">=22"
+		"node": ">=22.18"
 	},
 	"scripts": {
 		"dev": "vite dev",
@@ -15,6 +15,8 @@
 		"lint:strings": "node scripts/check-strings.mjs",
 		"test": "vitest run",
 		"test:e2e": "playwright test",
+		"content:tatoeba-pairs": "node tool/build-tatoeba-pairs.ts",
+		"content:prepare": "node tool/prepare-content.ts",
 		"verify": "npm run check && npm run lint:strings && npm run test && npm run build"
 	},
 	"dependencies": {
@@ -38,7 +40,8 @@
 		"tailwindcss": "^4.3.0",
 		"typescript": "^6.0.3",
 		"vite": "^8.3.0",
-		"vitest": "^5.0.3"
+		"vitest": "^5.0.3",
+		"word-list": "^4.1.0"
 	},
 	"imports": {
 		"#lib": "./src/lib/index.js",
