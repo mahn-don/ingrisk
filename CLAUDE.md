@@ -31,7 +31,8 @@ plans/                   roadmap.md + per-phase plans (phase-XX.md)
 src/
   lib/
     server/              server-only code; never imported by client code
-      db/                Drizzle schema, migrations, repositories
+      db/                Drizzle schema, migrations/, repositories/ (intent-level functions; callers
+                         never build queries), client.ts (connection, pragmas, migrate)
       llm/               provider adapters, prompts, Zod schemas
       srs/               ts-fsrs wrapper
       generation/        exercise generation + validation pipeline
@@ -65,6 +66,9 @@ Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e test
 | `npm run test:e2e` | Playwright (builds and previews the app first) |
 | `npm run content:prepare` | Rebuild `src/lib/server/content/*.json` from `tool/raw/` (deterministic) |
 | `npm run content:tatoeba-pairs` | Re-join the Tatoeba exports into `tool/raw/tatoeba-eng-vie.tsv` |
+| `npm run db:generate` | Generate a SQL migration from `src/lib/server/db/schema.ts` (commit it) |
+| `npm run db:migrate` | Apply pending migrations to `DATABASE_PATH` (default `data/app.db`) |
+| `npm run db:studio` | Browse the database with Drizzle Studio |
 | `npm run verify` | `check` → `lint:strings` → `test` → `build`, stops at first failure |
 
 ## Hard rules
@@ -83,6 +87,12 @@ Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e test
    `plans/phase-XX.md`; stay within its scope; finish with `npm run verify` passing; then commit
    (one commit per phase) and tick the phase in `plans/roadmap.md`.
 7. **Language:** code, comments and commit messages are in English. UI strings are in Vietnamese.
+
+## Database
+
+- Change the schema in `schema.ts`, then `npm run db:generate` and commit the new migration.
+  Never edit an applied migration. Migrations run automatically at server start.
+- Repositories take the db as a parameter; tests use `createTestDb()` (in-memory, migrated).
 
 ## Environment
 
