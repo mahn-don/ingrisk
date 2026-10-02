@@ -449,16 +449,16 @@ This phase produces asset files with a one-off script in `tool/`. It adds no app
 
 > Write `tool/prepare-content.ts` producing three asset files. Do not add any app code in this phase.
 >
-> 1. **NGSL** — read `tool/raw/ngsl.csv`, emit `static/data/ngsl.json` as `[{headword, pos, rank, band}]`, bucketing rank into 8 bands of roughly 350 words. Include the CC BY-SA 4.0 license string in a header field.
+> 1. **NGSL** — read `tool/raw/NGSL_1.2_stats.csv` (ranks), `tool/raw/NGSL_1.2_lemmatized_for_research.csv` (inflected forms) and `tool/raw/SUP_lemmatized.csv` (supplementary words), emit `src/lib/server/content/ngsl.json` as `[{headword, pos, rank, band, forms}]` plus a `supplementary` array, bucketing rank into 8 bands of roughly 350 words. Include the CC BY-SA 4.0 license string in a header field.
 >
-> 2. **Tatoeba EN–VI** — from the Tatoeba `sentences.csv` and `links.csv` dumps in `tool/raw/`, extract English–Vietnamese pairs: filter to `eng` and `vie`, join through links, deduplicate, drop pairs where the English sentence exceeds 15 words or contains characters outside basic Latin and common punctuation. Emit `static/data/tatoeba-en-vi.json` as `[{tatoeba_id_en, en, vi, word_count}]` with the CC BY 2.0 FR license string in a header. **Print the final pair count** — I expect only a few thousand.
+> 2. **Tatoeba EN–VI** — from the pairs file `tool/raw/tatoeba-eng-vie.tsv` (joined from the Tatoeba per-language exports by `tool/build-tatoeba-pairs.ts`), normalize, deduplicate, and drop pairs where the English sentence exceeds 15 words or contains characters outside basic Latin and common punctuation. Emit `src/lib/server/content/tatoeba-en-vi.json` as `[{tatoeba_id_en, tatoeba_id_vi, en, vi, word_count, ngsl_band_max, off_list_count}]` with the CC BY 2.0 FR license string in a header. **Print the final pair count** — I expect only a few thousand.
 >
-> 3. **Pseudo-words** — create `static/data/pseudowords.json` with 120 English-phonotactically-plausible non-words for the yes/no vocabulary test (e.g. `plurthy`, `dispone`, `fantule`). Generate candidates, then **filter them against the NGSL list and a standard English word list to guarantee none is a real word.** Output `[{form}]`. Print every rejected candidate so I can review the final list by hand.
+> 3. **Pseudo-words** — create `src/lib/server/content/pseudowords.json` with 120 English-phonotactically-plausible non-words for the yes/no vocabulary test (e.g. `plurthy`, `dispone`, `fantule`). Generate candidates, then **filter them against the NGSL list and a standard English word list to guarantee none is a real word.** Output `[{form}]`. Print every rejected candidate so I can review the final list by hand. Words removed by hand go in `tool/pseudowords-exclude.txt`, which every re-run honours.
 >
 > Make the script idempotent and re-runnable. Document where to download each raw input in `plans/phase-01.md`.
 
 **Result:** three asset files and the Tatoeba pair count.
-**Check:** open each file; **read all 120 pseudo-words yourself** and delete any that look like real words; confirm the license headers are present.
+**Check:** open each file; **read all 120 pseudo-words yourself** (`tool/pseudowords-review.txt`) and remove any that look like real words by adding them to `tool/pseudowords-exclude.txt` and re-running; confirm the license headers are present.
 
 > **Manual gate:** do not skip the pseudo-word review. It takes five minutes, and it is the only place in the app where one bad item silently corrupts a measurement.
 
@@ -519,7 +519,7 @@ This phase produces asset files with a one-off script in `tool/`. It adds no app
 
 > Build `src/lib/server/generation/`.
 >
-> Import the Phase 1 assets on first run: `ngsl.json` → `lexemes` with `freq_band` and `license_tag`; `tatoeba-en-vi.json` → `sentences` with `source='tatoeba'` and `license_tag`.
+> Import the Phase 1 assets from `src/lib/server/content/` on first run: `ngsl.json` → `lexemes` with `freq_band` and `license_tag`; `tatoeba-en-vi.json` → `sentences` with `source='tatoeba'` and `license_tag`, using its `ngsl_band_max` and `off_list_count` fields to set `level_band`.
 >
 > Implement generators for: cloze, reading passage plus 2 comprehension questions, VI→EN translation task, error-correction drill targeting a given grammar topic code, and writing feedback. Each gets a prompt template in `src/lib/server/llm/prompts/` and a Zod schema. The cloze and writing-feedback schemas are in Part II §5 of `docs/architecture.md`.
 >
@@ -577,7 +577,7 @@ Deploy early, while the app is nearly empty. Infrastructure problems are much ch
 
 > Implement the placement flow per Part I §7 of `docs/architecture.md`.
 >
-> **Part A** — adaptive yes/no vocabulary: real words sampled from NGSL bands interleaved with pseudo-words from `pseudowords.json`. Score hits minus false alarms. Step the band up or down on performance. Around 40 items, 3–4 minutes.
+> **Part A** — adaptive yes/no vocabulary: real words sampled from NGSL bands interleaved with pseudo-words from `src/lib/server/content/pseudowords.json`. Score hits minus false alarms. Step the band up or down on performance. Around 40 items, 3–4 minutes.
 >
 > **Part B** — 2–3 cloze/C-test passages drawn from validated `generated_cache` items. Never generate live during the test.
 >

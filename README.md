@@ -6,7 +6,7 @@ PWA on a phone and run on a small VPS. The design lives in [`docs/architecture.m
 
 ## Prerequisites
 
-- Node.js 22 LTS (with npm)
+- Node.js 22 LTS, **22.18 or newer** (with npm); the `tool/` scripts run TypeScript directly via Node's type stripping
 - [gitleaks](https://github.com/gitleaks/gitleaks) on your `PATH` (the pre-commit hook refuses to
   commit without it), e.g. `brew install gitleaks` or
   `go install github.com/zricethezav/gitleaks/v8@latest`
@@ -31,4 +31,6 @@ cp .env.example .env              # then fill in values; never commit .env
 | `npm run lint:strings` | Fail if a `.svelte` file contains Vietnamese text |
 | `npm test` | Unit tests (Vitest) |
 | `npm run test:e2e` | End-to-end tests (Playwright) |
+| `npm run content:prepare` | Rebuild the content assets in `src/lib/server/content/` from `tool/raw/` |
+| `npm run content:tatoeba-pairs` | Re-join the Tatoeba exports (see `tool/raw/README.md`) |
 | `npm run verify` | `check`, `lint:strings`, `test` and `build`, stopping at the first failure |

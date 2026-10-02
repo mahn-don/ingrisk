@@ -26,3 +26,6 @@ playwright-report
 
 # Database files
 data/*.db*
+
+# Tatoeba per-language exports (large; the derived tool/raw/tatoeba-eng-vie.tsv is committed instead)
+tool/raw/tatoeba-full/
