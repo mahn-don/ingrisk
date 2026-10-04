@@ -3,11 +3,14 @@
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { migrate as drizzleMigrate } from 'drizzle-orm/better-sqlite3/migrator';
+import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import * as schema from './schema.ts';
 
 export type Db = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
+/** A database or an open transaction: repositories accept either, so callers can compose writes atomically. */
+export type DbOrTx = BaseSQLiteDatabase<'sync', Database.RunResult, typeof schema>;
 
 export const DEFAULT_DATABASE_PATH = 'data/app.db';
 
@@ -32,8 +35,7 @@ export function createDb(path: string): Db {
 }
 
 /** Apply pending migrations. Already-applied migrations are skipped, so this is safe to repeat. */
-export function migrate(db: Db): void {
-	const folder = migrationsFolder();
+export function migrate(db: Db, folder = migrationsFolder()): void {
 	if (!existsSync(folder)) throw new Error(`Migrations folder not found: ${folder}`);
 	drizzleMigrate(db, { migrationsFolder: folder });
 }

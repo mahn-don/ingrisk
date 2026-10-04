@@ -1,5 +1,5 @@
 import { and, asc, eq, isNull } from 'drizzle-orm';
-import type { Db } from '../client.ts';
+import type { DbOrTx } from '../client.ts';
 import { type CEFR_LEVELS, type WritingError, writingSubmissions } from '../schema.ts';
 
 export type WritingSubmission = typeof writingSubmissions.$inferSelect;
@@ -15,7 +15,7 @@ export interface WritingFeedback {
 }
 
 /** Writing submissions: queued on submit, scored later, feedback shown once. */
-export function writingRepo(db: Db) {
+export function writingRepo(db: DbOrTx) {
 	const setById = (id: number, values: Partial<WritingSubmission>) => {
 		const row = db
 			.update(writingSubmissions)

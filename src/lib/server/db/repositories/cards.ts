@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, lte, ne, sql } from 'drizzle-orm';
-import type { Db } from '../client.ts';
+import type { DbOrTx } from '../client.ts';
 import { cards } from '../schema.ts';
 
 export type CardRow = typeof cards.$inferSelect;
@@ -14,7 +14,7 @@ export interface CardCounts {
 	learning: number;
 }
 
-export function cardsRepo(db: Db) {
+export function cardsRepo(db: DbOrTx) {
 	return {
 		byId(id: number): CardRow | undefined {
 			return db.select().from(cards).where(eq(cards.id, id)).get();
@@ -28,6 +28,10 @@ export function cardsRepo(db: Db) {
 				.orderBy(asc(cards.due), asc(cards.id))
 				.limit(limit)
 				.all();
+		},
+		/** Cards never reviewed, oldest first (creation order). */
+		newCards(limit: number): CardRow[] {
+			return db.select().from(cards).where(eq(cards.state, 'New')).orderBy(asc(cards.id)).limit(limit).all();
 		},
 		counts(now: Date): CardCounts {
 			const row = db
