@@ -3,6 +3,7 @@ import { getDb, type DbOrTx } from '../client.ts';
 import { cacheRepo } from './cache.ts';
 import { cardsRepo } from './cards.ts';
 import { grammarTopicsRepo } from './grammar-topics.ts';
+import { llmCallsRepo } from './llm-calls.ts';
 import { profileRepo } from './profile.ts';
 import { providersRepo } from './providers.ts';
 import { reviewLogsRepo } from './review-logs.ts';
@@ -21,7 +22,8 @@ export function createRepositories(db: DbOrTx) {
 		cache: cacheRepo(db),
 		writing: writingRepo(db),
 		sessions: sessionsRepo(db),
-		grammarTopics: grammarTopicsRepo(db)
+		grammarTopics: grammarTopicsRepo(db),
+		llmCalls: llmCallsRepo(db)
 	};
 }
 

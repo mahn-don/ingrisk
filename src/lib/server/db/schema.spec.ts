@@ -55,6 +55,7 @@ describe('migrations', () => {
 			'generated_cache',
 			'grammar_topics',
 			'lexemes',
+			'llm_calls',
 			'llm_providers',
 			'placement_results',
 			'review_logs',
@@ -108,19 +109,55 @@ describe('migrations', () => {
 
 			const db = createDb(':memory:');
 			migrate(db, partial);
-			const provider = db
-				.insert(llmProviders)
-				.values({ name: 'p', baseUrl: 'https://x', model: 'm', wireFormat: 'openai', envKeyName: 'OPENAI_API_KEY' })
-				.returning()
-				.get();
-			db.$client.prepare('update settings set desired_retention = 0.85, active_provider_id = ?').run(provider.id);
+			// Raw SQL: at schema 0000 the table lacks columns that later migrations add.
+			const providerId = Number(
+				db.$client
+					.prepare("insert into llm_providers (name, base_url, model, wire_format, env_key_name) values ('p', 'https://x', 'm', 'openai', 'OPENAI_API_KEY')")
+					.run().lastInsertRowid
+			);
+			db.$client.prepare('update settings set desired_retention = 0.85, active_provider_id = ?').run(providerId);
 			migrate(db, full);
 			expect(db.select().from(settings).get()).toMatchObject({
 				desiredRetention: 0.85,
-				activeProviderId: provider.id,
+				activeProviderId: providerId,
 				newCardsPerDay: 10
 			});
 			expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it('rebuilds llm_providers (0001 -> 0002) without losing the active provider', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'silentenglish-mig2-'));
+		try {
+			const full = migrationsFolder();
+			const partial = join(dir, 'migrations');
+			mkdirSync(join(partial, 'meta'), { recursive: true });
+			const journal = JSON.parse(readFileSync(join(full, 'meta', '_journal.json'), 'utf8'));
+			journal.entries = journal.entries.slice(0, 2);
+			for (const entry of journal.entries) copyFileSync(join(full, `${entry.tag}.sql`), join(partial, `${entry.tag}.sql`));
+			writeFileSync(join(partial, 'meta', '_journal.json'), JSON.stringify(journal));
+
+			const db = createDb(':memory:');
+			migrate(db, partial);
+			const insert = db.$client.prepare(
+				'insert into llm_providers (name, base_url, model, wire_format, env_key_name, is_fallback) values (?, ?, ?, ?, ?, ?)'
+			);
+			insert.run('A', 'https://api.anthropic.com', 'c', 'anthropic', 'ANTHROPIC_API_KEY', 1);
+			const active = insert.run('O', 'https://api.openai.com/v1', 'g', 'openai', 'OPENAI_API_KEY', 0).lastInsertRowid;
+			db.$client.prepare('update settings set active_provider_id = ?').run(active);
+			migrate(db, full);
+			expect(db.select().from(settings).get()?.activeProviderId).toBe(Number(active));
+			expect(db.select().from(llmProviders).all().map((p) => [p.name, p.structuredMode, p.isFallback])).toEqual([
+				['A', 'json_schema', true],
+				['O', 'json_schema', false]
+			]);
+			expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+			expect(tableNames(db).filter((t) => t.startsWith('__') && t !== '__drizzle_migrations')).toEqual([]);
+			// env_key_name is now optional (a local Ollama), and still rejects key-shaped values.
+			insert.run('Ollama', 'http://localhost:11434/v1', 'llama', 'openai', null, 0);
+			expect(() => insert.run('Bad', 'https://x', 'm', 'openai', 'sk-abc', 0)).toThrow(/CHECK/);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -145,13 +182,19 @@ describe('migrations', () => {
 describe('schema guards', () => {
 	it('has no column that could hold a secret', () => {
 		const db = createTestDb();
+		// Allowed: env_key_name (a variable *name*) and the llm_calls token *counts* (INTEGER only).
+		const allowed = new Set(['llm_providers.env_key_name', 'llm_calls.input_tokens', 'llm_calls.output_tokens']);
 		const offending = tableNames(db).flatMap((table) =>
 			columnNames(db, table)
-				.filter((c) => /key|secret|token|password/i.test(c) && c !== 'env_key_name')
+				.filter((c) => /key|secret|token|password/i.test(c) && !allowed.has(`${table}.${c}`))
 				.map((c) => `${table}.${c}`)
 		);
 		expect(offending).toEqual([]);
 		expect(columnNames(db, 'llm_providers')).toContain('env_key_name');
+		const types = Object.fromEntries(
+			(db.$client.pragma('table_info(llm_calls)') as { name: string; type: string }[]).map((c) => [c.name, c.type.toLowerCase()])
+		);
+		expect([types.input_tokens, types.output_tokens]).toEqual(['integer', 'integer']);
 	});
 
 	it('allows exactly one settings row and one profile row', () => {

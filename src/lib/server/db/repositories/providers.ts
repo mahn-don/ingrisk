@@ -11,6 +11,12 @@ export function providersRepo(db: DbOrTx) {
 		list(): Provider[] {
 			return db.select().from(llmProviders).orderBy(asc(llmProviders.id)).all();
 		},
+		byId(id: number): Provider | undefined {
+			return db.select().from(llmProviders).where(eq(llmProviders.id, id)).get();
+		},
+		byName(name: string): Provider | undefined {
+			return db.select().from(llmProviders).where(eq(llmProviders.name, name)).get();
+		},
 		/** The provider selected in settings, if it exists and is enabled. */
 		active(): Provider | undefined {
 			return db

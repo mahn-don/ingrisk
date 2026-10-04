@@ -208,11 +208,17 @@ settings(id = 1, desired_retention, weekly_goal_days, default_session_budget, ne
 -- CHECKs: desired_retention 0.70–0.97, weekly_goal_days 1–7, default_session_budget 1–60,
 -- new_cards_per_day 0–50 (added by migration 0001).
 
-llm_providers(id, name UNIQUE, base_url, model, wire_format, env_key_name,
-              enabled, is_fallback)
--- env_key_name names an environment variable, e.g. 'OPENAI_API_KEY'; a CHECK allows only
--- [A-Z0-9_], 1–64 chars. At most one row has is_fallback = 1 (partial unique index).
--- NO COLUMN EVER HOLDS A KEY.
+llm_providers(id, name UNIQUE, base_url, model, wire_format, structured_mode,
+              env_key_name, enabled, is_fallback)
+-- env_key_name names an environment variable, e.g. 'OPENAI_API_KEY'; NULL for a provider
+-- without a key (local Ollama); otherwise a CHECK allows only [A-Z0-9_], 1–64 chars.
+-- structured_mode defaults to 'json_schema'. At most one row has is_fallback = 1.
+-- NO COLUMN EVER HOLDS A KEY. (structured_mode and nullable env_key_name: migration 0002.)
+
+llm_calls(id, created_at, provider_id, model, purpose, mode, attempt, ok, http_status,
+          error_code, input_tokens, output_tokens, latency_ms)
+-- one row per HTTP attempt; never prompt/response text or keys. provider_id is not a
+-- foreign key, so the log survives provider deletion. (migration 0002)
 
 user_profile(id = 1, theta, cefr_estimate, vstep_estimate, ielts_estimate,
              toeic_estimate, vocab_theta, grammar_theta, reading_theta,
@@ -258,35 +264,45 @@ grammar_topics(id, code UNIQUE, name_vi, name_en, l1_interference)
 -- seeded with the 10 codes of Part I §6.
 ```
 
-Indexes: `cards(due)`, `review_logs(card_id, review)`, `collocations(lexeme_id)`, `generated_cache(kind, params_hash)`, `generated_cache(kind, validated, served_at)`, `writing_submissions(status)`, plus the unique indexes above.
+Indexes: `cards(due)`, `review_logs(card_id, review)`, `llm_calls(created_at)`, `collocations(lexeme_id)`, `generated_cache(kind, params_hash)`, `generated_cache(kind, validated, served_at)`, `writing_submissions(status)`, plus the unique indexes above.
 
-Enumerations: `kind` ∈ cloze | translate | grammar | reading | error (cards and generated_cache); `status` ∈ queued | scored | failed; `wire_format` ∈ openai | anthropic; `shape` ∈ quick | read | write; `writing_status` ∈ none | queued | scored; `feedback_mode` ∈ direct | indirect; `prompt_mode` ∈ choice | typing; `state` ∈ New | Learning | Review | Relearning and `rating` ∈ Manual | Again | Hard | Good | Easy (ts-fsrs `State` and `Rating` names); CEFR columns ∈ A1 … C2; `code` ∈ the taxonomy codes.
+Enumerations: `kind` ∈ cloze | translate | grammar | reading | error (cards and generated_cache); `status` ∈ queued | scored | failed; `wire_format` ∈ openai | anthropic; `structured_mode` ∈ json_schema | tool | json_prompt; `shape` ∈ quick | read | write; `writing_status` ∈ none | queued | scored; `feedback_mode` ∈ direct | indirect; `prompt_mode` ∈ choice | typing; `state` ∈ New | Learning | Review | Relearning and `rating` ∈ Manual | Again | Hard | Good | Easy (ts-fsrs `State` and `Rating` names); CEFR columns ∈ A1 … C2; `code` ∈ the taxonomy codes.
 
 Connection (`src/lib/server/db/client.ts`): `DATABASE_PATH` (default `data/app.db`), pragmas `journal_mode = WAL` (required by Litestream), `foreign_keys = ON`, `busy_timeout = 5000`, `synchronous = NORMAL`. Migrations run at server start from the SvelteKit `init` hook; a failed migration stops the server.
 
 ### 4. LLM layer
 
-One interface, two adapters, both normalized to `LlmResponse { text, parsedJson, usage, model, finishReason }`.
+`src/lib/server/llm/`: a provider-agnostic client that turns a request plus a **Zod schema** into a validated object. Zod is the single source of truth; JSON Schema is derived from it (Zod 4 `toJSONSchema`).
 
-**OpenAI-compatible adapter** — covers OpenAI, OpenRouter, DeepSeek, Gemini's compatible endpoint, Ollama:
-- `POST {base_url}/chat/completions`
-- System prompt is a message with `role: "system"`
-- Structured output via `response_format: { type: "json_schema" }`
-- Tool arguments arrive as a **JSON string** needing a parse step
-- Usage: `usage.prompt_tokens` / `usage.completion_tokens`
+```ts
+generateStructured({ purpose, system, user, schema, maxTokens = 2000, temperature?, providerId?, fallback = true })
+  → { data, usage: { inputTokens, outputTokens }, model, providerId, attempts }
+generateText({ purpose, system, user, ... }) → { text, usage, model, providerId, attempts }
+```
 
-**Anthropic adapter:**
-- `POST {base_url}/v1/messages`, with an `anthropic-version` header
-- System prompt is a **top-level `system` parameter**, not a message
-- `max_tokens` is **required**
-- Tool use via `stop_reason: "tool_use"`; the content block's `input` is **already parsed JSON**
-- Usage: `usage.input_tokens` / `usage.output_tokens`
+**Wire formats.**
+- Anthropic: `POST {base_url}/v1/messages`, headers `x-api-key` and `anthropic-version: 2023-06-01`; `system` is a top-level parameter; `max_tokens` is required. `temperature` is only sent when the caller sets it, because models after Claude Opus 4.6 reject any value other than 1.0. Usage: `usage.input_tokens` / `usage.output_tokens`.
+- OpenAI-compatible: `POST {base_url}/chat/completions`, `Authorization: Bearer`; the system prompt is a `role: "system"` message; `max_completion_tokens` for api.openai.com, `max_tokens` for other compatible servers; default temperature 0.4. Usage: `usage.prompt_tokens` / `usage.completion_tokens`.
 
-These four divergences (system placement, tool-argument shape, usage field names, streaming event shapes) are the whole reason the abstraction exists. Each needs its own test.
+**Structured-output modes** (`llm_providers.structured_mode`):
 
-API keys are read from `process.env`, never written to the database, never logged, never included in an error message. A test asserts that an adapter error's string form does not contain the key.
+| Mode | Anthropic | OpenAI-compatible |
+|---|---|---|
+| `json_schema` (default) | `output_config: { format: { type: "json_schema", schema } }` (GA; the beta `output_format` is deprecated) | `response_format: { type: "json_schema", json_schema: { name, schema, strict: true } }` |
+| `tool` | one tool + `tool_choice: { type: "tool", name }`; `tool_use.input` is already an object (forced tool use is rejected by the newest Claude models) | one function + `tool_choice: { type: "function", ... }`; `arguments` is a JSON string |
+| `json_prompt` | the schema in the system prompt; JSON extracted from the text | same |
 
-Retry with exponential backoff on 429 and 5xx; fall back to the provider flagged `is_fallback`; surface a clear Vietnamese error if all fail. Do not hard-code prices: model tiers and rates change often.
+**Schema sanitizer.** `toProviderSchema(schema, target)` strips the keywords a target rejects and appends them to the field's `description` as a hint: OpenAI strict (`minItems`, `maxItems`, `minLength`, `maxLength`, `minimum`, `maximum`, `pattern`, …; plus `additionalProperties: false` and every property in `required`), Anthropic (`minimum`, `maximum`, `multipleOf`, `minLength`, `maxLength`, `maxItems`, and `minItems` other than 0/1; `additionalProperties: false`). Stripped constraints are still enforced, because **every response is validated locally with the original Zod schema**.
+
+**Pipeline.** Call in the provider's mode → extract the JSON (native output, tool input, or text with code fences and prose stripped) → normalize string enums case-insensitively (`"art"` → `"ART"`; providers don't guarantee enum casing) → validate with Zod → on failure, **one repair attempt** (the previous output and the Zod issues are sent back), then `LlmSchemaError` (raw output and issues, redacted). A refusal (Anthropic `stop_reason: "refusal"`, OpenAI `message.refusal` or `finish_reason: "content_filter"`) throws `LlmRefusalError`, never retried.
+
+**Transport, retry, fallback.** Global `fetch` (injected for tests), 60 s timeout per attempt. Network errors, timeouts and HTTP 429/500/502/503/504/529 are retried up to 3 attempts with exponential backoff and jitter, honouring `Retry-After`; other 4xx fail at once. The provider flagged `is_fallback` is used after retries are exhausted, on 401/403, or when the key's env var is missing — never on a schema error or a refusal. `base_url` must be `https://`, except `http://localhost` / `http://127.0.0.1` (Ollama).
+
+**Call log.** `llm_calls` gets one row per HTTP attempt: provider, model, purpose, mode, attempt, ok, HTTP status, error code, token counts, latency. **Never prompt or response text, never a key.** `countSince(ts)` feeds rate limiting (Phase 11); `usageSince(ts)` gives token totals per provider and model.
+
+**Secrets.** The key is read from `process.env[provider.env_key_name]` at call time, never cached, never logged. Every thrown error passes through `redact()`, which removes the keys, `Authorization` / `x-api-key` header values and `sk-…` tokens, and errors carry no `cause` chain.
+
+Surface a clear Vietnamese error in the UI if all providers fail. Do not hard-code prices: model tiers and rates change often.
 
 ### 5. Generation and the validation pipeline
 
@@ -539,20 +555,20 @@ This phase produces asset files with a one-off script in `tool/`. It adds no app
 
 #### Phase 4 — LLM provider layer
 
-> Build `src/lib/server/llm/` with an `LlmClient` interface `generate(request) → LlmResponse` and two adapters.
+> Build `src/lib/server/llm/` (design in Part II §4): a provider-agnostic client that turns a request plus a Zod schema into a validated object. No exercise prompts (Phase 5), no routes, no UI.
 >
-> **OpenAI-compatible adapter** — `POST {base_url}/chat/completions`; system prompt as a `system` role message; structured output via `response_format: { type: "json_schema" }`; tool arguments arrive as a JSON **string** requiring a parse; usage from `usage.prompt_tokens` / `usage.completion_tokens`.
+> - **Modes:** add `structured_mode` (`json_schema` | `tool` | `json_prompt`, default `json_schema`) to `llm_providers` and make `env_key_name` nullable (keyless Ollama), in a migration.
+> - **Schemas:** derive JSON Schema from Zod; `toProviderSchema(schema, target)` sanitizes for OpenAI strict and Anthropic, moving stripped constraints into descriptions. Always validate locally with Zod.
+> - **Client:** `generateStructured({ purpose, system, user, schema, maxTokens, temperature, providerId })` → call, extract JSON, normalize enum casing, validate, one repair attempt, else `LlmSchemaError`; refusals throw `LlmRefusalError`. Also `generateText`.
+> - **Transport:** injected `fetch`, 60 s timeout, retry (3 attempts, backoff with jitter, `Retry-After`) on network errors, timeouts and 429/500/502/503/504/529; fallback to `is_fallback` after exhausted retries, on 401/403 or a missing key env var, never on schema errors or refusals. `base_url` must be https except localhost.
+> - **Call log:** `llm_calls` table and repository (`record`, `countSince`, `usageSince`); one row per HTTP attempt; no text, no keys.
+> - **Secrets:** key read from `process.env` at call time; every error goes through `redact()`.
+> - **Tools:** `npm run llm:provider:add` (insert a provider row) and `npm run llm:smoke -- --provider <name>` (one live structured call; never in CI).
 >
-> **Anthropic adapter** — `POST {base_url}/v1/messages` with an `anthropic-version` header; system prompt as a **top-level `system` parameter**; `max_tokens` **required**; tool use via `stop_reason: "tool_use"` with content-block `input` already parsed; usage from `usage.input_tokens` / `usage.output_tokens`.
->
-> Normalize both to `LlmResponse { text, parsedJson, usage, model, finishReason }`. Read provider config from the `llm_providers` table; read the API key from `process.env[provider.env_key_name]`. **The key must never be written to the database, logged, or included in an error message** — add a test asserting a thrown adapter error's string form does not contain the key.
->
-> Add exponential-backoff retry on 429 and 5xx, and fallback to the provider flagged `is_fallback`.
->
-> Test with mocked HTTP only, never a live endpoint. Write one explicit test per wire-format divergence: system-prompt placement, tool-argument shape, usage field names, required `max_tokens`.
+> Test with mocked `fetch` only: request shape per wire format and mode, response parsing, JSON extraction, enum normalization, the sanitizer, repair, retry, fallback, refusals, key safety (no key in any error or `llm_calls` row) and config validation.
 
-**Result:** LLM layer with both adapters and divergence tests.
-**Check:** `npm test` passes, including the key-leak test.
+**Result:** LLM layer with both wire formats, three structured modes, and tests.
+**Check:** `npm test` passes, including the key-leak test; `npm run llm:smoke -- --provider <name>` returns a parsed object with your real key.
 
 ---
 

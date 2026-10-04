@@ -18,6 +18,8 @@ import {
 export const CARD_KINDS = ['cloze', 'translate', 'grammar', 'reading', 'error'] as const;
 export const WRITING_STATUSES = ['queued', 'scored', 'failed'] as const;
 export const WIRE_FORMATS = ['openai', 'anthropic'] as const;
+/** How a provider is asked for structured output (see src/lib/server/llm/). */
+export const STRUCTURED_MODES = ['json_schema', 'tool', 'json_prompt'] as const;
 export const SESSION_SHAPES = ['quick', 'read', 'write'] as const;
 export const PLACEMENT_WRITING_STATUSES = ['none', 'queued', 'scored'] as const;
 /** Direct correction plus a short explanation (default, Part I §5), or indirect prompts. */
@@ -77,8 +79,12 @@ export const llmProviders = sqliteTable(
 		baseUrl: text('base_url').notNull(),
 		model: text('model').notNull(),
 		wireFormat: text('wire_format', { enum: WIRE_FORMATS }).notNull(),
-		/** Name of the environment variable holding the API key, e.g. OPENAI_API_KEY. Never the key. */
-		envKeyName: text('env_key_name').notNull(),
+		structuredMode: text('structured_mode', { enum: STRUCTURED_MODES }).notNull().default('json_schema'),
+		/**
+		 * Name of the environment variable holding the API key, e.g. OPENAI_API_KEY. Never the key.
+		 * NULL for providers that need no key (a local Ollama).
+		 */
+		envKeyName: text('env_key_name'),
 		enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
 		isFallback: integer('is_fallback', { mode: 'boolean' }).notNull().default(false)
 	},
@@ -86,10 +92,11 @@ export const llmProviders = sqliteTable(
 		uniqueIndex('llm_providers_name_unique').on(t.name),
 		uniqueIndex('llm_providers_one_fallback').on(t.isFallback).where(sql`${t.isFallback} = 1`),
 		check('llm_providers_wire_format', oneOf(t.wireFormat, WIRE_FORMATS)),
+		check('llm_providers_structured_mode', oneOf(t.structuredMode, STRUCTURED_MODES)),
 		// Upper-case env var names only: an API key pasted here by mistake is rejected.
 		check(
 			'llm_providers_env_key_name',
-			sql`length(${t.envKeyName}) between 1 and 64 and ${t.envKeyName} not glob '*[^A-Z0-9_]*'`
+			sql`${t.envKeyName} is null or (length(${t.envKeyName}) between 1 and 64 and ${t.envKeyName} not glob '*[^A-Z0-9_]*')`
 		)
 	]
 );
@@ -382,4 +389,34 @@ export const writingSubmissions = sqliteTable(
 		check('writing_submissions_status', oneOf(t.status, WRITING_STATUSES)),
 		check('writing_submissions_cefr_estimate', oneOf(t.cefrEstimate, CEFR_LEVELS))
 	]
+);
+
+// --- LLM call log -------------------------------------------------------------------------------
+
+/**
+ * One row per HTTP attempt to an LLM provider: metadata only. Prompt and response text and API
+ * keys are never stored. provider_id is deliberately not a foreign key, so the log survives
+ * provider deletion.
+ */
+export const llmCalls = sqliteTable(
+	'llm_calls',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+		providerId: integer('provider_id').notNull(),
+		model: text('model').notNull(),
+		/** What the call was for, e.g. 'cloze' or 'writing_feedback'. */
+		purpose: text('purpose').notNull(),
+		/** A structured mode, or 'text' for plain text generation. */
+		mode: text('mode').notNull(),
+		/** 1-based HTTP attempt number within one generate call (retries, repair, fallback). */
+		attempt: integer('attempt').notNull(),
+		ok: integer('ok', { mode: 'boolean' }).notNull(),
+		httpStatus: integer('http_status'),
+		errorCode: text('error_code'),
+		inputTokens: integer('input_tokens'),
+		outputTokens: integer('output_tokens'),
+		latencyMs: integer('latency_ms').notNull()
+	},
+	(t) => [index('llm_calls_created_at').on(t.createdAt)]
 );
