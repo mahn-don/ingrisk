@@ -184,47 +184,71 @@ All Vietnamese UI strings live in `lib/messages/vi.ts`. No i18n library is neede
 
 ### 3. Data model
 
-```sql
-settings(id, desired_retention, weekly_goal_days, default_session_budget,
-         feedback_mode, active_provider_id)
+Implemented in `src/lib/server/db/schema.ts` (Drizzle), with migrations in `src/lib/server/db/migrations/`.
 
-llm_providers(id, name, base_url, model, wire_format, env_key_name,
+**Conventions:** timestamps are `integer` Unix milliseconds; JSON columns are `text`; booleans are `integer` 0/1; enumerations are `text` with a CHECK on the allowed values; every foreign key states its `ON DELETE`. Column names are snake_case (TypeScript properties are camelCase).
+
+```sql
+settings(id = 1, desired_retention, weekly_goal_days, default_session_budget,
+         feedback_mode, active_provider_id → llm_providers ON DELETE SET NULL)
+-- single row, CHECK (id = 1); seeded: 0.9, 5, 8, 'direct', NULL.
+-- CHECKs: desired_retention 0.70–0.97, weekly_goal_days 1–7, default_session_budget 1–60.
+
+llm_providers(id, name UNIQUE, base_url, model, wire_format, env_key_name,
               enabled, is_fallback)
--- env_key_name names an environment variable, e.g. 'OPENAI_API_KEY'.
+-- env_key_name names an environment variable, e.g. 'OPENAI_API_KEY'; a CHECK allows only
+-- [A-Z0-9_], 1–64 chars. At most one row has is_fallback = 1 (partial unique index).
 -- NO COLUMN EVER HOLDS A KEY.
 
-user_profile(id, theta, cefr_estimate, vstep_estimate, ielts_estimate,
+user_profile(id = 1, theta, cefr_estimate, vstep_estimate, ielts_estimate,
              toeic_estimate, vocab_theta, grammar_theta, reading_theta,
              writing_theta, known_band_ceiling, updated_at)
+-- single row, CHECK (id = 1); seeded with null estimates and known_band_ceiling = 1.
 
 placement_results(id, taken_at, theta, cefr, subscores_json, item_log_json,
                   writing_status)
 
-lexemes(id, headword, pos, ngsl_rank, freq_band, vi_gloss, en_def,
-        source, license_tag)
-collocations(id, lexeme_id, chunk, example_en, example_vi)
-sentences(id, en_text, vi_text, source, tatoeba_id, license_tag, level_band)
+lexemes(id, headword UNIQUE, pos, ngsl_rank, freq_band, forms, supplementary,
+        vi_gloss, en_def, source, license_tag)
+-- forms: JSON array of every inflected form; supplementary: NGSL days/months/number words.
+collocations(id, lexeme_id → lexemes ON DELETE CASCADE, chunk, example_en, example_vi)
+sentences(id, en_text, vi_text, source, tatoeba_id_en UNIQUE, tatoeba_id_vi,
+          ngsl_band_max, off_list_count, license_tag, level_band)
+-- tatoeba_id_en is NULL for LLM-generated sentences.
 
-cards(id, kind, lexeme_id, sentence_id, grammar_topic_id,
-      state, stability, difficulty, due_at, reps, lapses,
-      last_review_at, prompt_mode)
-review_logs(id, card_id, reviewed_at, rating, elapsed_days,
+cards(id, kind, lexeme_id → lexemes, sentence_id → sentences,
+      grammar_topic_id → grammar_topics,          -- all ON DELETE RESTRICT
+      prompt_mode,
+      due, stability, difficulty, elapsed_days, scheduled_days, learning_steps,
+      reps, lapses, state, last_review)           -- every field of ts-fsrs Card
+-- UNIQUE (kind, lexeme_id, sentence_id, grammar_topic_id), NULLs counted as 0.
+review_logs(id, card_id → cards ON DELETE RESTRICT,
+            rating, state, due, stability, difficulty, elapsed_days,
+            last_elapsed_days, scheduled_days, learning_steps, review,
+                                                  -- every field of ts-fsrs ReviewLog
             old_s, new_s, old_d, new_d)
+-- A card with reviews cannot be deleted, so the review history is never lost.
 
-sessions(id, started_at, ended_at, budget_min, shape, items_done, streak_after)
+sessions(id, client_session_id UNIQUE, started_at, ended_at, budget_min, shape,
+         items_done, streak_after)
 
-generated_cache(id, kind, params_hash, payload_json, model, created_at,
-                validated, validation_notes)
+generated_cache(id, kind, params_hash, content_hash UNIQUE, level_band,
+                payload_json, model, created_at, validated, validation_notes,
+                served_at)
 
-writing_submissions(id, session_id, prompt, user_text, corrected_text,
-                    errors_json, cefr_estimate, status, submitted_at, scored_at)
+writing_submissions(id, session_id → sessions ON DELETE SET NULL, prompt,
+                    user_text, corrected_text, errors_json, cefr_estimate, status,
+                    submitted_at, scored_at, feedback_seen_at)
 
-grammar_topics(id, code, name_vi, name_en, l1_interference)
+grammar_topics(id, code UNIQUE, name_vi, name_en, l1_interference)
+-- seeded with the 10 codes of Part I §6.
 ```
 
-Indexes: `cards(due_at)`, `generated_cache(kind, params_hash)`, `writing_submissions(status)`.
+Indexes: `cards(due)`, `review_logs(card_id, review)`, `collocations(lexeme_id)`, `generated_cache(kind, params_hash)`, `generated_cache(kind, validated, served_at)`, `writing_submissions(status)`, plus the unique indexes above.
 
-Enumerations: `kind` ∈ cloze | translate | grammar | reading | error; `status` ∈ queued | scored | failed; `wire_format` ∈ openai | anthropic; `shape` ∈ quick | read | write; `writing_status` ∈ none | queued | scored.
+Enumerations: `kind` ∈ cloze | translate | grammar | reading | error (cards and generated_cache); `status` ∈ queued | scored | failed; `wire_format` ∈ openai | anthropic; `shape` ∈ quick | read | write; `writing_status` ∈ none | queued | scored; `feedback_mode` ∈ direct | indirect; `prompt_mode` ∈ choice | typing; `state` ∈ New | Learning | Review | Relearning and `rating` ∈ Manual | Again | Hard | Good | Easy (ts-fsrs `State` and `Rating` names); CEFR columns ∈ A1 … C2; `code` ∈ the taxonomy codes.
+
+Connection (`src/lib/server/db/client.ts`): `DATABASE_PATH` (default `data/app.db`), pragmas `journal_mode = WAL` (required by Litestream), `foreign_keys = ON`, `busy_timeout = 5000`, `synchronous = NORMAL`. Migrations run at server start from the SvelteKit `init` hook; a failed migration stops the server.
 
 ### 4. LLM layer
 
@@ -466,13 +490,13 @@ This phase produces asset files with a one-off script in `tool/`. It adds no app
 
 #### Phase 2 — Data layer
 
-> Implement the Drizzle schema exactly as specified in Part II §3 of `docs/architecture.md`. Generate migrations. Create repository modules in `src/lib/server/db/repositories/` exposing intent-level functions — `dueCards(limit)`, `queuedWritingSubmissions()`, `activeProvider()`, `cacheItems(kind, n)` — not raw queries.
+> Implement the Drizzle schema exactly as specified in Part II §3 of `docs/architecture.md`, with the connection in `src/lib/server/db/client.ts` (WAL and the other pragmas). Generate migrations into `src/lib/server/db/migrations/` and apply them at server start. Create repository modules in `src/lib/server/db/repositories/` exposing intent-level functions — e.g. `cards.dueCards(now, limit)`, `writing.queued()`, `providers.active()`, `cache.takeUnserved(kind, levelBand, n)` — not raw queries.
 >
-> Add indexes on `cards(due_at)`, `generated_cache(kind, params_hash)`, `writing_submissions(status)`.
+> Add the indexes listed in Part II §3.
 >
-> Seed `grammar_topics` from the L1 interference taxonomy in Part I §6 as part of the initial migration.
+> Seed `grammar_topics` from the L1 interference taxonomy in Part I §6, and the single `settings` and `user_profile` rows, as part of the initial migration.
 >
-> Add `db:generate` and `db:migrate` npm scripts and document them in `CLAUDE.md`.
+> Add `db:generate`, `db:migrate` and `db:studio` npm scripts and document them in `CLAUDE.md`.
 >
 > Write Vitest tests against an in-memory SQLite database covering create/read/update for every table, plus one migration test. **No business logic in this phase** — no scheduling, no LLM, no UI.
 
@@ -489,7 +513,7 @@ This phase produces asset files with a one-off script in `tool/`. It adds no app
 >
 > Write tests stepping a card through realistic rating sequences (Again/Good/Good/Easy, and a lapse after a long interval) and asserting that intervals grow monotonically for successful reviews and collapse on a lapse. Pin the ts-fsrs version in `package.json`.
 >
-> Also expose `dueCards(limit)` ordered by `due_at`, and a function returning counts of due/new/learning cards for the home screen.
+> Also expose `dueCards(limit)` ordered by `due`, and a function returning counts of due/new/learning cards for the home screen.
 
 **Result:** scheduler and tests.
 **Check:** run the tests; step one card through Again/Good/Good/Easy and confirm the intervals grow plausibly (roughly minutes → days → weeks).

@@ -69,9 +69,15 @@ Vietnamese ones; three links are missing both).
 - Rejected if: on `tool/pseudowords-exclude.txt`; any NGSL form or supplementary word; in the
   word list; a real word after adding or removing -s, -ed, -ing, -er or -y (with simple e-drop);
   `q` without `u`; three identical letters; ending in v, j or q; a blocked offensive substring.
-- The final 120 are in `tool/pseudowords-review.txt`. **Manual review still pending.** To remove
-  a word, add it to `tool/pseudowords-exclude.txt` and re-run `content:prepare`. Only that word
-  is replaced; the rest keep their places.
+- The final 120 are in `tool/pseudowords-review.txt`. To remove a word, add it to
+  `tool/pseudowords-exclude.txt` and re-run `content:prepare`. Only that word is replaced; the
+  rest keep their places.
+- **Manual review done (2026-10-02).** The owner excluded 11 words (toprope, eldon, thepet,
+  thurush, stringock, earthast, hourlon, hourgule, skinide, gridow, clipond). The same rule was
+  then applied to the replacements: any starting with a real word of 4+ letters (in `word-list`
+  or NGSL) was excluded too, over four more rounds (choupot, hishey, hemplate, snogrey, doobane,
+  flabule, fronthen, tounky, fountet, torthot). Final replacements: cezey, coodide, daclot,
+  flaincule, frouspen, gurgond, nengible, slosock, sloubix, vuskel, wuskid.
 
 ## Judgement calls
 

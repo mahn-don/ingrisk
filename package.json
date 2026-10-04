@@ -17,11 +17,14 @@
 		"test:e2e": "playwright test",
 		"content:tatoeba-pairs": "node tool/build-tatoeba-pairs.ts",
 		"content:prepare": "node tool/prepare-content.ts",
+		"db:generate": "drizzle-kit generate",
+		"db:migrate": "node --env-file-if-exists=.env src/lib/server/db/migrate-cli.ts",
+		"db:studio": "drizzle-kit studio",
 		"verify": "npm run check && npm run lint:strings && npm run test && npm run build"
 	},
 	"dependencies": {
 		"@node-rs/argon2": "^2.2.1",
-		"better-sqlite3": "^13.0.3",
+		"better-sqlite3": "^12.11.1",
 		"drizzle-orm": "^0.45.3",
 		"ts-fsrs": "^5.4.2",
 		"zod": "^4.6.5"
