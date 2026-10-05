@@ -12,14 +12,12 @@ import { PROMPT_VERSION as DISTRACTORS_VERSION } from '../../llm/prompts/cloze-d
 import type { BlocklistMatcher } from '../blocklist.ts';
 import { buildFormIndex } from '../forms.ts';
 import { seededShuffle } from '../random.ts';
-import type { CallBudget } from './batch.ts';
+import { type RunBudget, startBudget } from '../budget.ts';
 import { type Candidate, type GapType, MAX_OFF_LIST, corpusWords, selectCandidates, sentenceCandidates } from './candidates.ts';
 import { type CriticInput, runCritic } from './critic.ts';
 import { fetchDistractors } from './distractors.ts';
 import { checkRules, ruleReason } from './rules.ts';
 
-export const DEFAULT_DAILY_CALL_CAP = 500;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface BuildOptions {
 	/** Inclusive band range of the items (default 1-8). */
@@ -32,6 +30,8 @@ export interface BuildOptions {
 	maxCalls: number;
 	/** Refuse to start when the last 24 h already hold this many llm_calls rows. */
 	dailyCap: number;
+	/** A budget shared with other pipelines (prefetch); maxCalls and dailyCap are then ignored. */
+	budget?: RunBudget;
 }
 
 export interface BuildDeps {
@@ -39,17 +39,6 @@ export interface BuildDeps {
 	llm: LlmDeps;
 	isWord: (word: string) => boolean;
 	blocklist: BlocklistMatcher;
-}
-
-export class DailyCapError extends Error {
-	readonly used: number;
-	readonly cap: number;
-	constructor(used: number, cap: number) {
-		super(`Refusing to start: ${used} LLM calls in the last 24 h (LLM_DAILY_CALL_CAP is ${cap})`);
-		this.name = 'DailyCapError';
-		this.used = used;
-		this.cap = cap;
-	}
 }
 
 type PerType = Record<GapType, number>;
@@ -85,16 +74,9 @@ export const shuffleOptions = (options: readonly string[], contentHash: string) 
 export async function buildCloze(options: BuildOptions, deps: BuildDeps): Promise<BuildSummary> {
 	const db = deps.llm.db;
 	const now = deps.llm.now();
+	const budget = options.budget ?? startBudget(db, now, options);
 	const calls = llmCallsRepo(db);
-	const usedToday = calls.countSince(new Date(now.getTime() - DAY_MS));
-	if (usedToday >= options.dailyCap) throw new DailyCapError(usedToday, options.dailyCap);
 	const baseline = calls.maxId();
-	const budget: CallBudget = {
-		canCall: () => {
-			const used = calls.countAfterId(baseline);
-			return used < options.maxCalls && usedToday + used < options.dailyCap;
-		}
-	};
 
 	const summary: BuildSummary = {
 		available: perType(),

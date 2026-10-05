@@ -1,10 +1,15 @@
 // Import the Phase 1 content files into the database. Idempotent: a second run changes nothing.
-// Usage: npm run content:import [-- --reblock]
-import { parseArgs } from 'node:util';
 import { DEFAULT_DATABASE_PATH, getDb } from '../src/lib/server/db/client.ts';
 import { importContent } from '../src/lib/server/generation/content-files.ts';
+import { parseCli } from './lib/cli.ts';
 
-const { values } = parseArgs({ options: { reblock: { type: 'boolean', default: false } } });
+const values = parseCli({
+	command: 'npm run content:import --',
+	summary: 'Upsert the Phase 1 content JSON (NGSL lexemes, Tatoeba sentences) into the database. Idempotent.',
+	usage: ['--reblock          Re-apply the current blocklist to every sentence (new sentences always get it)'],
+	example: '--reblock',
+	options: { reblock: { type: 'boolean' } }
+});
 
 console.log(`Importing into ${process.env.DATABASE_PATH || DEFAULT_DATABASE_PATH}`);
 const { lexemes, sentences } = importContent(getDb(), { reblock: values.reblock });

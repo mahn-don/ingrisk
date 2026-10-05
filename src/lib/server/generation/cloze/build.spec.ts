@@ -5,25 +5,26 @@ import { sentencesRepo } from '../../db/repositories/sentences.ts';
 import { testDeps } from '../../llm/test-helpers.ts';
 import { type Fixture, fixtureDb } from '../test-fixtures.ts';
 import { tokenize, withGap } from '../tokens.ts';
-import { unlimitedBudget } from './batch.ts';
-import { type BuildOptions, DailyCapError, buildCloze, formatSummary } from './build.ts';
-import { type CannedOptions, cannedFetch } from './canned-llm.ts';
+import { unlimitedBudget } from '../batch.ts';
+import { DailyCapError } from '../budget.ts';
+import { type BuildOptions, buildCloze, formatSummary } from './build.ts';
+import { type CannedOptions, cannedFetch } from '../canned-llm.ts';
 import { type Candidate, candidateHash } from './candidates.ts';
 import { fetchDistractors } from './distractors.ts';
 
 function setup(overrides: Partial<CannedOptions> = {}) {
 	const fx = fixtureDb();
-	const knownSentences = new Set(sentencesRepo(fx.db).all().map((s) => s.enText));
+	const corpus = sentencesRepo(fx.db).all().map((s) => s.enText);
 	const requests: { items: unknown[] }[] = [];
 	const fetch = cannedFetch({
 		forms: fx.forms,
 		blocklist: fx.blocklist,
 		isWord: fx.isWord,
-		knownSentences,
+		corpus,
 		...overrides,
-		onRequest: (payload) => {
+		onRequest: (payload, purpose) => {
 			requests.push(payload);
-			return overrides.onRequest?.(payload) ?? 'ok';
+			return overrides.onRequest?.(payload, purpose) ?? 'ok';
 		}
 	});
 	const { deps } = testDeps(fx.db, fetch);

@@ -7,7 +7,16 @@ import { buildFormIndex, buildNgsl, parseLemmatized, parseStats } from './lib/ng
 import { generatePseudowords, parseExcludeList } from './lib/pseudowords.ts';
 import { filterPairs, toItems } from './lib/tatoeba.ts';
 import { parsePairsTsv } from './lib/tatoeba-pairs.ts';
+import { parseCli } from './lib/cli.ts';
 import { contentFile, toJson } from './lib/text.ts';
+
+parseCli({
+	command: 'npm run content:prepare --',
+	summary: 'Rebuild src/lib/server/content/*.json from tool/raw/ (deterministic: a re-run changes nothing).',
+	usage: [],
+	example: '',
+	options: {}
+});
 
 const PSEUDOWORD_COUNT = 120;
 const PSEUDOWORD_SEED = 20261002;

@@ -2,7 +2,7 @@
 import { type LlmDeps, generateStructured } from '../../llm/client.ts';
 import * as prompt from '../../llm/prompts/cloze-distractors.ts';
 import { capitalize, tokenize, withGap } from '../tokens.ts';
-import { type BatchRun, type CallBudget, runBatches } from './batch.ts';
+import { type BatchRun, type CallBudget, runBatches } from '../batch.ts';
 import type { Candidate } from './candidates.ts';
 
 export interface Distractors {

@@ -3,7 +3,11 @@
 import type { z } from 'zod';
 import type { Db } from '../db/client.ts';
 import { lexemesRepo } from '../db/repositories/lexemes.ts';
-import { setupProviders, openaiProvider } from '../llm/test-helpers.ts';
+import { sentencesRepo } from '../db/repositories/sentences.ts';
+import { openaiProvider, setupProviders, testDeps } from '../llm/test-helpers.ts';
+import { type CannedOptions, cannedFetch } from './canned-llm.ts';
+import type { GenerationContext } from './context.ts';
+import { buildWordClasses } from './drills/word-classes.ts';
 import { type BlocklistMatcher, blocklistMatcher, parseBlocklist } from './blocklist.ts';
 import { type FormIndex, buildFormIndex } from './forms.ts';
 import { type NgslFile, type TatoebaFile, importLexemes, importSentences } from './import.ts';
@@ -96,4 +100,27 @@ export function fixtureDb(): Fixture {
 	const blocklist = blocklistMatcher(parseBlocklist(BLOCKLIST), forms);
 	importSentences(db, TATOEBA, blocklist);
 	return { db, providerId: primaryId, forms, blocklist, isWord: fixtureIsWord(forms) };
+}
+
+/** The fixture database plus the canned LLM and a full generation context (for builder tests). */
+export function cannedWorld(overrides: Partial<CannedOptions> = {}) {
+	const fx = fixtureDb();
+	const corpus = sentencesRepo(fx.db)
+		.all()
+		.map((s) => s.enText);
+	const requests: { purpose: string; payload: Record<string, unknown> }[] = [];
+	const fetch = cannedFetch({
+		forms: fx.forms,
+		blocklist: fx.blocklist,
+		isWord: fx.isWord,
+		corpus,
+		...overrides,
+		onRequest: (payload, purpose) => {
+			requests.push({ purpose, payload });
+			return overrides.onRequest?.(payload, purpose) ?? 'ok';
+		}
+	});
+	const { deps: llm } = testDeps(fx.db, fetch);
+	const context: GenerationContext = { forms: fx.forms, blocklist: fx.blocklist, classes: buildWordClasses(fx.forms, corpus), isWord: fx.isWord, corpus };
+	return { fx, llm, context, requests };
 }

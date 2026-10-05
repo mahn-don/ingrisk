@@ -3,7 +3,16 @@
 import { createReadStream, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { parseCli } from './lib/cli.ts';
 import { formatPairsTsv, joinPairs, parseLinks, parseSentenceLine } from './lib/tatoeba-pairs.ts';
+
+parseCli({
+	command: 'npm run content:tatoeba-pairs --',
+	summary: 'Join the Tatoeba per-language exports in tool/raw/tatoeba-full/ into tool/raw/tatoeba-eng-vie.tsv.',
+	usage: [],
+	example: '',
+	options: {}
+});
 
 const RAW = join(import.meta.dirname, 'raw');
 const FULL = join(RAW, 'tatoeba-full');

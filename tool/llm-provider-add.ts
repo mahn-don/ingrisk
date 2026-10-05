@@ -1,21 +1,27 @@
 // Add (or update, by name) an LLM provider row. The key itself is never stored: only the name of
 // the environment variable that holds it.
-// Usage: npm run llm:provider:add -- --name Anthropic --base-url https://api.anthropic.com \
-//          --model <model-id> --wire-format anthropic [--structured-mode json_schema] \
-//          [--env-key-name ANTHROPIC_API_KEY | --no-key] [--fallback] [--activate]
-import { parseArgs } from 'node:util';
 import { DEFAULT_DATABASE_PATH, getDb } from '../src/lib/server/db/client.ts';
 import { providersRepo } from '../src/lib/server/db/repositories/providers.ts';
 import { settingsRepo } from '../src/lib/server/db/repositories/settings.ts';
 import { STRUCTURED_MODES, WIRE_FORMATS } from '../src/lib/server/db/schema.ts';
 import { assertAllowedBaseUrl } from '../src/lib/server/llm/config.ts';
+import { fail, parseCli } from './lib/cli.ts';
 
-function fail(message: string): never {
-	console.error(`llm:provider:add: ${message}`);
-	process.exit(1);
-}
-
-const { values } = parseArgs({
+const values = parseCli({
+	command: 'npm run llm:provider:add --',
+	summary: 'Add an LLM provider, or update the one with the same name. Stores the NAME of the env variable holding the key, never the key.',
+	usage: [
+		'--name NAME              Provider name (required; an existing name is updated)',
+		'--base-url URL           https URL (http only for localhost) (required)',
+		'--model ID               Model id (required)',
+		`--wire-format F          ${WIRE_FORMATS.join(' | ')} (required)`,
+		`--structured-mode M      ${STRUCTURED_MODES.join(' | ')} (default json_schema)`,
+		'--env-key-name NAME      Environment variable holding the key, e.g. ANTHROPIC_API_KEY',
+		'--no-key                 The provider needs no key (a local Ollama)',
+		'--fallback               Use it when the active provider is unavailable',
+		'--activate               Make it the active provider'
+	],
+	example: '--name Anthropic --base-url https://api.anthropic.com --model claude-sonnet-5-5 --wire-format anthropic --env-key-name ANTHROPIC_API_KEY --activate',
 	options: {
 		name: { type: 'string' },
 		'base-url': { type: 'string' },

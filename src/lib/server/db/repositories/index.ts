@@ -4,6 +4,7 @@ import { cacheRepo } from './cache.ts';
 import { cardsRepo } from './cards.ts';
 import { clozeItemsRepo } from './cloze-items.ts';
 import { grammarTopicsRepo } from './grammar-topics.ts';
+import { jobLocksRepo } from './job-locks.ts';
 import { lexemesRepo } from './lexemes.ts';
 import { llmCallsRepo } from './llm-calls.ts';
 import { profileRepo } from './profile.ts';
@@ -29,7 +30,8 @@ export function createRepositories(db: DbOrTx) {
 		llmCalls: llmCallsRepo(db),
 		lexemes: lexemesRepo(db),
 		sentences: sentencesRepo(db),
-		clozeItems: clozeItemsRepo(db)
+		clozeItems: clozeItemsRepo(db),
+		jobLocks: jobLocksRepo(db)
 	};
 }
 
