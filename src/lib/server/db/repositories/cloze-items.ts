@@ -1,6 +1,6 @@
-import { asc, count, eq, inArray } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull } from 'drizzle-orm';
 import type { DbOrTx } from '../client.ts';
-import { clozeItems, sentences } from '../schema.ts';
+import { cards, clozeItems, sentences } from '../schema.ts';
 
 export type ClozeItemRow = typeof clozeItems.$inferSelect;
 export type NewClozeItem = Omit<typeof clozeItems.$inferInsert, 'id'>;
@@ -43,6 +43,17 @@ export function clozeItemsRepo(db: DbOrTx) {
 		},
 		byValidated(validated: boolean): ClozeItemWithSentence[] {
 			return flatten(withSentence().where(eq(clozeItems.validated, validated)).orderBy(asc(clozeItems.id)).all());
+		},
+		/** Validated items no card uses yet, per band (the cloze stock prefetch keeps full). */
+		availableByBand(): Map<number, number> {
+			const rows = db
+				.select({ levelBand: clozeItems.levelBand, n: count() })
+				.from(clozeItems)
+				.leftJoin(cards, eq(cards.clozeItemId, clozeItems.id))
+				.where(and(eq(clozeItems.validated, true), isNull(cards.id)))
+				.groupBy(clozeItems.levelBand)
+				.all();
+			return new Map(rows.map((r) => [r.levelBand, r.n]));
 		},
 		/** Pool size per gap type, band and validation status. */
 		counts(): PoolCount[] {

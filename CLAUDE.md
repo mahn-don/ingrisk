@@ -36,7 +36,9 @@ src/
       llm/               provider client: wire formats, structured modes, retry/fallback, call log;
                          prompts/ (each module exports PROMPT_VERSION)
       srs/               ts-fsrs wrapper: scheduler, review, auto-rating, queue (never reads the clock)
-      generation/        content import; exercise generation + validation (cloze/: the cloze pool)
+      generation/        content import; generators + validation (cloze/, drills/, reading/), prefetch
+      grading/           live writing and translation grading (no cache)
+      cron/              cron endpoint logic (secret check, single-run lock)
       content/           generated JSON assets (NGSL, Tatoeba pairs, pseudo-words); built by
                          `npm run content:prepare`, never edited by hand. Exception:
                          blocklist.txt (hand-maintained; used by `content:import`)
@@ -71,6 +73,10 @@ Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e test
 | `npm run content:import` | Upsert the content JSON into the database (idempotent; `-- --reblock` re-applies the blocklist) |
 | `npm run cloze:build -- ...` | Build the cloze pool (`--bands 1-3 --types ... --limit --provider --max-calls --dry-run`) |
 | `npm run eval:cloze -- --n 30` | Write a cloze evaluation sheet to `tmp/eval/` for a human to grade |
+| `npm run eval:drills -- --n 20` / `eval:reading -- --n 4` | Drill / passage sheets to `tmp/eval/` (`--generate` builds first, `--dry-run` canned) |
+| `npm run eval:grading` | Grade `test/eval/grading-fixtures.json` twice each (live calls; `--dry-run` canned) |
+| `npm run prefetch -- [--max-calls N] [--dry-run]` | Top up the stock (cloze, drills, passages), cheapest first; same as the cron endpoint |
+| `npm run llm:usage -- --days 7` | LLM calls and tokens per day × purpose × model |
 | `npm run db:generate` | Generate a SQL migration from `src/lib/server/db/schema.ts` (commit it) |
 | `npm run db:migrate` | Apply pending migrations to `DATABASE_PATH` (default `data/app.db`) |
 | `npm run db:studio` | Browse the database with Drizzle Studio |
@@ -110,8 +116,10 @@ Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e test
 ## LLM
 
 - All LLM output is validated with Zod locally; provider-side schema enforcement is never trusted alone.
-- Tests and `--dry-run` use a fake `fetch` (`llm/test-helpers.ts`, `generation/cloze/canned-llm.ts`),
-  never a live endpoint. `cloze:build` is capped by `--max-calls` and `LLM_DAILY_CALL_CAP`.
+- Tests and `--dry-run` use a fake `fetch` (`llm/test-helpers.ts`, `generation/canned-llm.ts`),
+  never a live endpoint. Every generator runs on a budget (`generation/budget.ts`): `--max-calls`
+  and `LLM_DAILY_CALL_CAP`. Every generated item passes rules and a blind critic.
+- Every CLI parses arguments with `tool/lib/cli.ts` (`parseArgs` strict, `--help` with an example).
 
 ## Environment
 

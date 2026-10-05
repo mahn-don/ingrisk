@@ -1,17 +1,18 @@
 // Write a human evaluation sheet of the cloze pool to tmp/eval/cloze-<timestamp>.md.
-// Usage: npm run eval:cloze [-- --n 30]
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { parseArgs } from 'node:util';
 import { getDb } from '../src/lib/server/db/client.ts';
 import { clozeItemsRepo } from '../src/lib/server/db/repositories/cloze-items.ts';
 import { evalMarkdown } from '../src/lib/server/generation/cloze/eval.ts';
+import { parseCli, positiveInt } from './lib/cli.ts';
 
-const { values } = parseArgs({ options: { n: { type: 'string', default: '30' } } });
-const n = Number(values.n);
-if (!Number.isInteger(n) || n < 1) {
-	console.error('--n must be a positive integer');
-	process.exit(1);
-}
+const values = parseCli({
+	command: 'npm run eval:cloze --',
+	summary: 'Write a cloze evaluation sheet (validated sample + 10 rejected items) to tmp/eval/.',
+	usage: ['--n N              Validated items to sample (default 30)'],
+	example: '--n 30',
+	options: { n: { type: 'string', default: '30' } }
+});
+const n = positiveInt('n', values.n);
 
 const repo = clozeItemsRepo(getDb());
 const validated = repo.byValidated(true);

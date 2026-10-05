@@ -1,5 +1,14 @@
 // `npm run db:migrate`: apply pending migrations to DATABASE_PATH (default data/app.db).
+import { parseCli } from '../../../../tool/lib/cli.ts';
 import { DEFAULT_DATABASE_PATH, createDb, migrate } from './client.ts';
+
+parseCli({
+	command: 'npm run db:migrate --',
+	summary: 'Apply pending migrations to DATABASE_PATH (default data/app.db).',
+	usage: [],
+	example: '',
+	options: {}
+});
 
 const path = process.env.DATABASE_PATH || DEFAULT_DATABASE_PATH;
 const db = createDb(path);

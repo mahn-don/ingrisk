@@ -3,7 +3,7 @@
 import { type LlmDeps, generateStructured } from '../../llm/client.ts';
 import * as prompt from '../../llm/prompts/cloze-critic.ts';
 import { fillGap, tokenize } from '../tokens.ts';
-import { type BatchRun, type CallBudget, runBatches } from './batch.ts';
+import { type BatchRun, type CallBudget, runBatches } from '../batch.ts';
 
 export interface CriticInput {
 	contentHash: string;

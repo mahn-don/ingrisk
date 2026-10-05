@@ -5,6 +5,16 @@ import { llmCalls } from '../schema.ts';
 export type LlmCallRow = typeof llmCalls.$inferSelect;
 export type NewLlmCall = Omit<typeof llmCalls.$inferInsert, 'id'>;
 
+export interface DailyUsage {
+	/** YYYY-MM-DD in Asia/Ho_Chi_Minh (UTC+7, no daylight saving). */
+	day: string;
+	purpose: string;
+	model: string;
+	calls: number;
+	inputTokens: number;
+	outputTokens: number;
+}
+
 export interface UsageEntry {
 	providerId: number;
 	model: string;
@@ -61,6 +71,24 @@ export function llmCallsRepo(db: DbOrTx) {
 				.where(gt(llmCalls.id, id))
 				.groupBy(llmCalls.providerId, llmCalls.model)
 				.orderBy(asc(llmCalls.providerId), asc(llmCalls.model))
+				.all();
+		},
+		/** HTTP attempts and tokens per day (ICT) x purpose x model since `since`, oldest day first. */
+		usageByDay(since: Date): DailyUsage[] {
+			const day = sql<string>`strftime('%Y-%m-%d', ${llmCalls.createdAt} / 1000 + 7 * 3600, 'unixepoch')`;
+			return db
+				.select({
+					day,
+					purpose: llmCalls.purpose,
+					model: llmCalls.model,
+					calls: count(),
+					inputTokens: sql<number>`coalesce(sum(${llmCalls.inputTokens}), 0)`,
+					outputTokens: sql<number>`coalesce(sum(${llmCalls.outputTokens}), 0)`
+				})
+				.from(llmCalls)
+				.where(gte(llmCalls.createdAt, since))
+				.groupBy(day, llmCalls.purpose, llmCalls.model)
+				.orderBy(asc(day), asc(llmCalls.purpose), asc(llmCalls.model))
 				.all();
 		},
 		all(): LlmCallRow[] {

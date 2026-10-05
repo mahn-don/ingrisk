@@ -1,0 +1,144 @@
+{
+	"description": "Fixtures for npm run eval:grading: 8 answers with known Vietnamese-learner errors (expected_codes), 2 correct translations that differ from the reference (must get zero errors and meaning_ok true), and 2 writing samples (one weak, one strong).",
+	"items": [
+		{
+			"id": "tns-art",
+			"type": "translation",
+			"level_band": 2,
+			"vi": "Hôm qua tôi đi chợ với mẹ.",
+			"reference_en": "Yesterday I went to the market with my mother.",
+			"user_en": "Yesterday I go to market with my mother.",
+			"expected_codes": [
+				"TNS",
+				"ART"
+			],
+			"note": "No tense marking after a past time marker; missing article."
+		},
+		{
+			"id": "sva-art",
+			"type": "translation",
+			"level_band": 2,
+			"vi": "Cô ấy làm việc ở một bệnh viện.",
+			"reference_en": "She works at a hospital.",
+			"user_en": "She work at hospital.",
+			"expected_codes": [
+				"SVA",
+				"ART"
+			],
+			"note": "No third-person -s; missing article."
+		},
+		{
+			"id": "cop-sva",
+			"type": "writing",
+			"level_band": 2,
+			"prompt_vi": "Giới thiệu các thành viên trong gia đình bạn: họ là ai và họ làm gì?",
+			"user_text": "My brother very tall and he like football.",
+			"expected_codes": [
+				"COP",
+				"SVA"
+			],
+			"note": "Missing 'is' before an adjective; no third-person -s."
+		},
+		{
+			"id": "plu",
+			"type": "translation",
+			"level_band": 1,
+			"vi": "Tôi có hai con mèo.",
+			"reference_en": "I have two cats.",
+			"user_en": "I have two cat.",
+			"expected_codes": [
+				"PLU"
+			],
+			"note": "No plural after a number."
+		},
+		{
+			"id": "wfm",
+			"type": "translation",
+			"level_band": 3,
+			"vi": "Anh ấy rất quan tâm đến âm nhạc.",
+			"reference_en": "He is very interested in music.",
+			"user_en": "He is very interesting in music.",
+			"expected_codes": [
+				"WFM"
+			],
+			"note": "-ing / -ed adjective confusion."
+		},
+		{
+			"id": "col",
+			"type": "writing",
+			"level_band": 3,
+			"prompt_vi": "Mô tả một ngày làm việc bình thường của bạn.",
+			"user_text": "Yesterday I did a mistake in my report and my boss was angry with me.",
+			"expected_codes": [
+				"COL"
+			],
+			"note": "'do a mistake' for 'make a mistake'."
+		},
+		{
+			"id": "wor",
+			"type": "translation",
+			"level_band": 2,
+			"vi": "Tôi thích cái áo màu đỏ này.",
+			"reference_en": "I like this red shirt.",
+			"user_en": "I like this shirt red.",
+			"expected_codes": [
+				"WOR"
+			],
+			"note": "Adjective after the noun, as in Vietnamese."
+		},
+		{
+			"id": "pre",
+			"type": "translation",
+			"level_band": 3,
+			"vi": "Việc đó phụ thuộc vào thời tiết.",
+			"reference_en": "That depends on the weather.",
+			"user_en": "That depends of the weather.",
+			"expected_codes": [
+				"PRE"
+			],
+			"note": "'depend of' for 'depend on'."
+		},
+		{
+			"id": "correct-1",
+			"type": "translation",
+			"level_band": 2,
+			"vi": "Tôi thường đi làm bằng xe buýt.",
+			"reference_en": "I usually go to work by bus.",
+			"user_en": "I usually take the bus to work.",
+			"expected_codes": [],
+			"note": "Correct, different from the reference: zero errors, meaning_ok true."
+		},
+		{
+			"id": "correct-2",
+			"type": "translation",
+			"level_band": 1,
+			"vi": "Hôm nay trời nóng quá.",
+			"reference_en": "It is very hot today.",
+			"user_en": "It's really hot today.",
+			"expected_codes": [],
+			"note": "Correct, different from the reference: zero errors, meaning_ok true."
+		},
+		{
+			"id": "writing-weak",
+			"type": "writing",
+			"level_band": 1,
+			"prompt_vi": "Giới thiệu các thành viên trong gia đình bạn: họ là ai và họ làm gì?",
+			"user_text": "My family have four people. My father is teacher. My mother work in a shop near my house. I have one sister, she 10 years old. We very happy together.",
+			"expected_codes": [
+				"SVA",
+				"ART",
+				"COP"
+			],
+			"note": "Weak sample: expect A1-A2 and the systematic errors ranked first."
+		},
+		{
+			"id": "writing-strong",
+			"type": "writing",
+			"level_band": 7,
+			"prompt_vi": "Viết email cho sếp để xin nghỉ hai ngày vào tuần sau. Giải thích lý do và cách bạn sắp xếp công việc khi vắng mặt.",
+			"user_text": "Dear Ms Hoa,\n\nI am writing to ask for two days of leave next Thursday and Friday. My grandmother is having an operation in Hue, and my family would like me to be with her while she recovers.\n\nBefore I leave, I will finish the monthly sales report and send it to you on Wednesday afternoon. Minh has kindly agreed to answer my clients' emails, and I have already shown him where the contract files are. If anything urgent comes up, I will check my messages every evening and reply as soon as I can.\n\nThank you for considering my request. Please let me know if you need any more information.\n\nBest regards,\nLan",
+			"expected_codes": [],
+			"note": "Strong sample: expect B2 or above and few or no errors."
+		}
+	]
+}

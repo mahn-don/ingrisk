@@ -55,6 +55,7 @@ describe('migrations', () => {
 			'collocations',
 			'generated_cache',
 			'grammar_topics',
+			'job_locks',
 			'lexemes',
 			'llm_calls',
 			'llm_providers',

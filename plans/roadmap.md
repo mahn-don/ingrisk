@@ -9,7 +9,7 @@ commit per phase, `npm run verify` green before committing.
 - [x] **Phase 3 — Spaced-repetition engine:** a thin `ts-fsrs` wrapper with `review()`, review logging, due-card queries and interval tests.
 - [x] **Phase 4 — LLM provider layer:** an `LlmClient` with OpenAI-compatible and Anthropic adapters, retry/fallback, and divergence + key-leak tests.
 - [x] **Phase 5a — Content import and the cloze pipeline:** idempotent content import with a blocklist, and a validated cloze pool (deterministic candidates, LLM distractors, rules, blind critic) with cost guards and a human eval sheet.
-- [ ] **Phase 5b — Other generators and prefetch:** reading passages, translation, error drills, writing feedback, Zod + rule validation, and the secret-guarded prefetch endpoint.
+- [x] **Phase 5b — Passages, error drills, grading and prefetch:** injected and LLM-written error drills and graded passages behind blind critics, live writing/translation grading, a static writing-prompt bank, and the locked, secret-guarded prefetch job.
 - [ ] **Phase 6 — App shell and authentication:** single-password login gate, app shell with navigation and theme, installable PWA.
 - [ ] **Phase 7 — Deploy to the VPS:** Caddy, systemd, Litestream, deploy script, cron and a runbook, with a proven backup restore.
 - [ ] **Phase 8 — Placement test:** the retakeable three-part placement flow with Elo-style estimation reported on CEFR/VSTEP/IELTS/TOEIC.

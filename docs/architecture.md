@@ -269,7 +269,14 @@ sessions(id, client_session_id UNIQUE, started_at, ended_at, budget_min, shape,
 generated_cache(id, kind, params_hash, content_hash UNIQUE, level_band,
                 payload_json, model, created_at, validated, validation_notes,
                 served_at, prompt_version)
--- prompt_version (migration 0003): the version string of the prompt module that produced it.
+-- prompt_version (migration 0003): the version string(s) of the prompt modules that produced it.
+-- params_hash: sha256 of the generation parameters that define a stock, e.g. kind 'error' +
+-- {topic_code}, kind 'reading' + {topic}. Rejected items are stored too (validated = 0, with
+-- validation_notes JSON {reason, ...}), so reruns skip their content_hash.
+
+job_locks(name PK, holder, acquired_at)
+-- One row while a job runs (name 'prefetch'); holder is the run's random token and only it
+-- releases the row. A row older than 30 minutes counts as free (a crashed run). (migration 0004)
 
 writing_submissions(id, session_id → sessions ON DELETE SET NULL, prompt,
                     user_text, corrected_text, errors_json, cefr_estimate, status,
@@ -342,15 +349,37 @@ Generation is batch and ahead of time, never during a session. Every prompt modu
 
 **Evaluation** (`npm run eval:cloze -- --n 30`) writes `tmp/eval/cloze-<timestamp>.md`: a table of `n` random validated items (sentence with gap, options, answer, `answer_vi`, gap type, band, a column to mark bad items) and 10 random rejected items with their reasons. Phase 5's hard gate is a human finding at most 1 bad item among 30.
 
-**Other generated kinds** (Phase 5b). A cron job at 03:00 (Asia/Ho_Chi_Minh) calls `/api/cron/prefetch` (guarded by a secret), filling `generated_cache` to N items per kind based on `known_band_ceiling`. Every generated item passes:
-1. **Schema validation** with Zod.
-2. **Rule checks:** the gap word occurs in the sentence; exactly one option is correct; distractors differ from each other and from the answer; content words are within the target band ceiling; the Vietnamese translation is non-empty and differs from the English.
-3. **Critic pass** (optional): a second cheap call asking "is this item unambiguous and correctly keyed?" Enable it for any kind with a high rejection rate.
-4. Store with `validated = true` only if all checks pass; otherwise store with notes for inspection and regenerate.
+**Error-correction drills** (Phase 5b; `generation/drills/`, kind `error` in `generated_cache`). Payload `{ sentence_with_error, corrected, original_span, corrected_span, topic_code, explanation_vi, source: 'tatoeba' | 'llm', sentence_id? }`.
 
-Threshold: over 95% pass rate per kind before relying on it.
+1. **Drafts.** For ART PLU SVA COP TNS PRE, a correct Tatoeba sentence (not blocked, 4–15 words, `off_list_count` ≤ 2, the requested band) gets one deterministic, L1-typical error (`drills/inject.ts`):
 
-**Writing-feedback schema**
+   | Code | Injection |
+   |---|---|
+   | `ART` | delete `a`/`an`/`the` before a singular countable noun (preferred), or swap `a` ↔ `an` |
+   | `PLU` | a plural noun right after a number or quantifier becomes singular (form map; irregular plurals listed) |
+   | `SVA` | a third-person present verb (`-s` form, `has`, `does`) after a third-person singular subject becomes its base form |
+   | `COP` | delete `is`/`are`/`am` before an adjective (optionally after `very`, `not`, …) that closes the predicate |
+   | `TNS` | a simple past next to a time marker (`yesterday`, `… ago`, `last week`) becomes its base form |
+   | `PRE` | a preposition is swapped using the Phase 5a confusion table (never the infinitive `to`) |
+
+   NGSL 1.2 has no part-of-speech tags, so word classes (countable nouns, adjectives, simple pasts) are inferred from the form map and corpus evidence (`drills/word-classes.ts`). For COL WFM WOR the LLM writes the drill (prompt `drill-generate`, 10 per call) including its explanation.
+2. **Rules** (`drills/rules.ts`): corrected ≠ erroneous; the changed region (between the common token prefix and suffix, so a word-order swap is one region) holds at most 3 tokens; the spans describe that change (replacing `original_span` by `corrected_span` yields the corrected sentence, and they cover the minimal diff; the stored spans are the minimal diff); the topic code is the requested one; nothing on the blocklist.
+3. **Explanation** (prompt `drill-explain`, 10 per call): `explanation_vi`, at most 2 short sentences, checked by rule.
+4. **Blind critic** (prompt `drill-critic`, 10 per call): the model sees only `sentence_with_error` and must find and fix all errors. Accepted only if it reports exactly one fix and its corrected sentence normalizes (case, quotes, spacing) to `corrected`.
+
+**Graded reading passages** (`generation/reading/`, kind `reading`). Input: a band and one of 20 everyday topics (`reading/topics.ts`; the least used topic for the band first). One passage per call (prompt `reading-passage`): `{ title_en, passage_en, questions: [{ question_en, options[4], answer_index, explanation_vi }] (2), glossary: [{ word, vi }] (≤ 5) }`, stored with `topic`, `word_count` and `coverage`. Options are shuffled by a seed from the passage. Rules: words within the band range (1–2: 60–90, 3–4: 90–130, 5–6: 130–170, 7–8: 170–220); **coverage ≥ 95%** of word tokens are function words, stock names (the prompt allows only listed names and places) or have a lemma band ≤ `level_band + 1`; every glossary word (or a form of its lemma) appears in the passage; options distinct; nothing on the blocklist. Blind critic (prompt `reading-critic`, 5 passages per call): it answers each question without the key and lists every defensible option; accepted only if it picks the intended option and reports exactly that one as defensible.
+
+**Grading services** (`src/lib/server/grading/`; live at answer time, never cached; the active provider with fallback). `gradeWriting({ prompt_vi, user_text, level_band, feedback_mode })` and `gradeTranslation({ vi, reference_en, user_en, level_band })` return the WritingFeedback schema below (translation adds `meaning_ok`). `gradeWriting` also returns `display`: in `indirect` mode this UI-facing shape omits `corrected_text`. The prompts forbid invented errors, rank errors by importance and ask for plain Vietnamese at the learner's level; the translation prompt states that the reference is one valid translation of many. A guard drops any error whose `original` is not in the learner's text or whose correction changes nothing.
+
+**Writing prompts** are a static, hand-written bank (`src/lib/server/content/writing-prompts.json`: 40 prompts `{ id, band_min, band_max, prompt_vi, hint_en, min_words, max_words }` across the bands and the 20 topics); no LLM at runtime. VI→EN translation tasks use Tatoeba pairs directly.
+
+**Prefetch** (`generation/prefetch.ts`). Stock targets (`generation/stock.ts`) for bands 1 … `known_band_ceiling + 1`: 60 validated cloze items no card uses yet per band; 4 unserved reading passages per band; 8 unserved drills per topic code and band. `prefetch({ maxCalls })` computes the shortfall and fills it cheapest first on one call budget: cloze (the Phase 5a pipeline) → injected drills → LLM-written drills → passages. Cloze and drills ask for 1.5× the shortfall, because the critics reject a share. It returns the items added per kind and band, rejections by reason, LLM calls and tokens.
+
+`POST /api/cron/prefetch` is called with `Content-Type: application/json` and a body of `{}` or `{ "maxCalls": N }` (SvelteKit's CSRF guard answers 403 to a cross-site POST without a JSON content type). `Authorization: Bearer <CRON_SECRET>` is compared with `crypto.timingSafeEqual` over SHA-256 digests (401 otherwise; 503 if `CRON_SECRET` is unset). One run at a time through the `job_locks` row (409 while held; released in `finally`; a lock older than 30 minutes is reclaimed). `LLM_DAILY_CALL_CAP` applies (429 when reached). It runs synchronously and returns the summary. `npm run prefetch -- [--max-calls N] [--dry-run]` runs the same function under the same lock. At runtime prefetch reads `src/lib/server/content/blocklist.txt` relative to the working directory and needs the `word-list` package (now a runtime dependency): Phase 7 must deploy both.
+
+**Cost guards everywhere.** Every generator runs on a budget (`generation/budget.ts`): `--max-calls` / `maxCalls` counts HTTP attempts, and a run refuses to start when the last 24 h already hold `LLM_DAILY_CALL_CAP` calls. Items whose LLM call failed are not stored, so the next run retries them. `npm run llm:usage -- --days 7` prints calls and tokens per day (ICT) × purpose × model.
+
+**Writing-feedback schema** (`llm/prompts/feedback.ts`)
 ```ts
 const WritingFeedback = z.object({
   corrected_text: z.string(),
@@ -359,15 +388,18 @@ const WritingFeedback = z.object({
     correction: z.string(),
     topic_code: z.enum(['ART','TNS','PLU','SVA','COP','PRE','COL','WFM','WOR','OTH']),
     explanation_vi: z.string()
-  })).max(3),
+  }).strict()).transform((errors) => errors.slice(0, 3)),  // ranked; at most 3 kept
   cefr_estimate: z.enum(['A1','A2','B1','B2','C1','C2']),
   scores: z.object({
-    range: z.number().int(),
-    accuracy: z.number().int(),
-    coherence: z.number().int()
-  })
+    range: z.number().int().min(1).max(5),
+    accuracy: z.number().int().min(1).max(5),
+    coherence: z.number().int().min(1).max(5)
+  }).strict()
 }).strict();
+const TranslationFeedback = WritingFeedback.extend({ meaning_ok: z.boolean() });
 ```
+
+Anthropic rejects array-size and numeric constraints in the provider schema (Part II §4), so the wire schema carries none and Zod enforces them locally. A list of more than 3 errors is cut to the 3 most important, instead of failing a live grading call and paying for a repair round.
 
 Constraining `topic_code` to the enum is what makes error mining work: free-text error labels cannot be aggregated into a weakness profile.
 
@@ -610,20 +642,21 @@ This phase produces asset files with a one-off script in `tool/`. It adds no app
 
 ---
 
-#### Phase 5b — Other generators and prefetch
+#### Phase 5b — Passages, error drills, grading and prefetch
 
-> Build the rest of `src/lib/server/generation/` (the cloze pool is Phase 5a).
+> Build the remaining generators, the grading services and the prefetch job (design in Part II §5; plan in `plans/phase-05b.md`). No UI. Reuse the 5a building blocks: form map, detectors, the blind-critic pattern, cost guards, `content_hash` dedupe, prompt versions. Prefer real Tatoeba sentences with deterministic transformations; use the LLM only for human-quality judgement or explanation, and verify every generated item with a blind critic.
 >
-> Implement generators for: reading passage plus 2 comprehension questions, VI→EN translation task, error-correction drill targeting a given grammar topic code, and writing feedback. Each gets a prompt template in `src/lib/server/llm/prompts/` (exporting a version string, as in Phase 5a) and a Zod schema. The writing-feedback schema is in Part II §5 of `docs/architecture.md`.
+> - **Error drills** (`kind = 'error'`): deterministic injection into Tatoeba sentences for ART PLU SVA COP TNS PRE; LLM-written for COL WFM WOR; a Vietnamese explanation (≤ 2 sentences, 10 per call); rules (one change region of ≤ 3 tokens, spans, topic, blocklist); a blind critic that sees only the erroneous sentence and must find exactly the one fix.
+> - **Reading passages** (`kind = 'reading'`): band + one of 20 topics; length by band; 2 questions; glossary ≤ 5; rules including 95% coverage at band + 1; a blind critic that answers without the key.
+> - **Grading** (live, no cache): `gradeWriting` (WritingFeedback; indirect mode hides `corrected_text` in the UI shape) and `gradeTranslation` (+ `meaning_ok`; the reference is one valid translation).
+> - **Writing prompt bank**: about 40 static prompts across bands and topics.
+> - **Prefetch**: stock targets (cloze per band, passages per band, drills per code × band, for bands 1 … ceiling + 1), cheapest first, `maxCalls`; `POST /api/cron/prefetch` with a timing-safe bearer secret, a single-run DB lock (stale after 30 min) and `LLM_DAILY_CALL_CAP`; `npm run prefetch`.
+> - **Tooling**: every CLI on `parseArgs` with `--help` and unknown-flag errors; `npm run llm:usage`; `eval:drills`, `eval:reading`, `eval:grading` (12 fixtures, each graded twice).
 >
-> Implement the validation pipeline: Zod parse → rule checks (gap word present in the sentence; exactly one correct option; distractors distinct from each other and from the answer; content words within the target band ceiling; Vietnamese translation present and different from the English) → store in `generated_cache` with `validated` and `validation_notes`.
->
-> Implement `prefetch(ceiling, counts)` filling the cache to N validated items per kind, and expose it at `POST /api/cron/prefetch` guarded by a `CRON_SECRET` compared with a timing-safe comparison.
->
-> Add `npm run eval:generation` — generates 30 items, runs validation, prints the pass rate per kind.
+> Test with a mocked LLM only.
 
-**Result:** generators working, validation pipeline, prefetch endpoint.
-**Check:** run the eval; the pass rate must exceed 95% per kind. **Read 10 accepted items yourself** — validation catches structure, not teaching quality.
+**Result:** drills, passages, grading services, the prefetch job and its endpoint.
+**Check:** `npm run verify`; `prefetch -- --dry-run` runs end to end; with a key, read `eval:drills`, `eval:reading` and `eval:grading` yourself — validation catches structure, not teaching quality.
 
 ---
 
@@ -656,7 +689,7 @@ Deploy early, while the app is nearly empty. Infrastructure problems are much ch
 > 2. `deploy/silentenglish.service` — a systemd unit running `node build/index.js`, `Restart=always`, `EnvironmentFile=/etc/silentenglish/.env`, running as a non-root user.
 > 3. `deploy/litestream.yml` — continuous replication of `data/app.db` to S3-compatible storage, with the bucket and credentials read from env.
 > 4. `deploy/deploy.sh` — `git pull && npm ci && npm run build && sudo systemctl restart silentenglish`, failing loudly on any step.
-> 5. `deploy/crontab` — call the prefetch endpoint at 03:00 Asia/Ho_Chi_Minh with the `CRON_SECRET`.
+> 5. `deploy/crontab` — call the prefetch endpoint at 03:00 Asia/Ho_Chi_Minh with the `CRON_SECRET` (POST, `Content-Type: application/json`, body `{}`).
 > 6. A runbook in `plans/phase-07.md` covering, in order: create the non-root user, SSH key-only access with password login disabled, ufw allowing only 22/80/443, fail2ban, install Node and Caddy, create `/etc/silentenglish/.env` with mode 600, first deploy, verify TLS, verify Litestream is replicating, and **restore the database from backup into a scratch directory to prove the backup actually works**.
 >
 > Do not put any secret in the repository. The `.env` file is created by hand on the server.

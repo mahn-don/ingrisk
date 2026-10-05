@@ -8,6 +8,15 @@ import { lexemes } from '../src/lib/server/db/schema.ts';
 import { describeInterval } from '../src/lib/server/srs/preview.ts';
 import { newCardFields, ratingName } from '../src/lib/server/srs/mapping.ts';
 import { review } from '../src/lib/server/srs/review.ts';
+import { parseCli } from './lib/cli.ts';
+
+parseCli({
+	command: 'npm run srs:walkthrough --',
+	summary: 'Print one card\'s FSRS intervals through a fixed rating sequence (in-memory database, fuzz off).',
+	usage: [],
+	example: '',
+	options: {}
+});
 
 const START = new Date('2026-10-05T02:00:00Z'); // 09:00 in Asia/Ho_Chi_Minh
 const SEQUENCE: Grade[] = [

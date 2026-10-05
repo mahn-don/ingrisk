@@ -20,12 +20,17 @@
 		"content:prepare": "node tool/prepare-content.ts",
 		"cloze:build": "node --env-file-if-exists=.env tool/cloze-build.ts",
 		"eval:cloze": "node --env-file-if-exists=.env tool/cloze-eval.ts",
+		"eval:drills": "node --env-file-if-exists=.env tool/eval-drills.ts",
+		"eval:reading": "node --env-file-if-exists=.env tool/eval-reading.ts",
+		"eval:grading": "node --env-file-if-exists=.env tool/eval-grading.ts",
+		"prefetch": "node --env-file-if-exists=.env tool/prefetch.ts",
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "node --env-file-if-exists=.env src/lib/server/db/migrate-cli.ts",
 		"db:studio": "drizzle-kit studio",
 		"srs:walkthrough": "node tool/srs-walkthrough.ts",
 		"llm:provider:add": "node --env-file-if-exists=.env tool/llm-provider-add.ts",
 		"llm:smoke": "node --env-file-if-exists=.env tool/llm-smoke.ts",
+		"llm:usage": "node --env-file-if-exists=.env tool/llm-usage.ts",
 		"verify": "npm run check && npm run lint:strings && npm run test && npm run build"
 	},
 	"dependencies": {
@@ -33,6 +38,7 @@
 		"better-sqlite3": "^12.11.1",
 		"drizzle-orm": "^0.45.3",
 		"ts-fsrs": "5.4.2",
+		"word-list": "^4.1.0",
 		"zod": "^4.6.5"
 	},
 	"devDependencies": {
@@ -49,8 +55,7 @@
 		"tailwindcss": "^4.3.0",
 		"typescript": "^6.0.3",
 		"vite": "^8.3.0",
-		"vitest": "^5.0.3",
-		"word-list": "^4.1.0"
+		"vitest": "^5.0.3"
 	},
 	"imports": {
 		"#lib": "./src/lib/index.js",

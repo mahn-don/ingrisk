@@ -1,5 +1,5 @@
 // Batched LLM calls with a call budget: one failing batch never loses the others.
-import { LlmError } from '../../llm/errors.ts';
+import { LlmError } from '../llm/errors.ts';
 
 export const BATCH_SIZE = 10;
 

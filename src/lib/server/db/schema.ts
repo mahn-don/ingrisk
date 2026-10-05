@@ -430,6 +430,17 @@ export const generatedCache = sqliteTable(
 	]
 );
 
+/**
+ * One row per running job (e.g. 'prefetch'): a run takes the row, finishes by deleting it.
+ * A row older than the job's stale limit counts as free (a crashed run never blocks forever).
+ */
+export const jobLocks = sqliteTable('job_locks', {
+	name: text('name').primaryKey(),
+	/** Random token of the run holding the lock; only that run releases it. */
+	holder: text('holder').notNull(),
+	acquiredAt: integer('acquired_at', { mode: 'timestamp_ms' }).notNull()
+});
+
 export const writingSubmissions = sqliteTable(
 	'writing_submissions',
 	{

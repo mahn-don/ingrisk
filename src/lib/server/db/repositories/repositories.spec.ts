@@ -230,3 +230,20 @@ describe('grammarTopics', () => {
 		expect(grammarTopics.byCode('COL')).toMatchObject({ nameEn: 'Collocation', nameVi: 'Kết hợp từ' });
 	});
 });
+
+describe('llmCallsRepo.usageByDay', () => {
+	it('groups calls and tokens by ICT day, purpose and model', () => {
+		const calls = createRepositories(createTestDb()).llmCalls;
+		const row = { providerId: 1, mode: 'json_schema' as const, attempt: 1, ok: true, httpStatus: 200, errorCode: null, latencyMs: 5 };
+		// 16:59 UTC is 23:59 ICT on the 4th; 17:00 UTC is 00:00 ICT on the 5th.
+		calls.record({ ...row, createdAt: new Date('2026-10-04T16:59:00Z'), model: 'm1', purpose: 'cloze_critic', inputTokens: 10, outputTokens: 1 });
+		calls.record({ ...row, createdAt: new Date('2026-10-04T17:00:00Z'), model: 'm1', purpose: 'cloze_critic', inputTokens: 20, outputTokens: 2 });
+		calls.record({ ...row, createdAt: new Date('2026-10-04T18:00:00Z'), model: 'm1', purpose: 'cloze_critic', inputTokens: 30, outputTokens: null });
+		calls.record({ ...row, createdAt: new Date('2026-10-04T18:00:00Z'), model: 'm2', purpose: 'grade_writing', inputTokens: 5, outputTokens: 5 });
+		expect(calls.usageByDay(new Date('2026-10-01T00:00:00Z'))).toEqual([
+			{ day: '2026-10-04', purpose: 'cloze_critic', model: 'm1', calls: 1, inputTokens: 10, outputTokens: 1 },
+			{ day: '2026-10-05', purpose: 'cloze_critic', model: 'm1', calls: 2, inputTokens: 50, outputTokens: 2 },
+			{ day: '2026-10-05', purpose: 'grade_writing', model: 'm2', calls: 1, inputTokens: 5, outputTokens: 5 }
+		]);
+	});
+});

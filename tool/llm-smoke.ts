@@ -1,14 +1,19 @@
 // Manual smoke test against a real provider (never run in CI): one tiny structured call.
-// Usage: npm run llm:smoke -- --provider <name>
-import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import { getDb } from '../src/lib/server/db/client.ts';
 import { llmCallsRepo } from '../src/lib/server/db/repositories/llm-calls.ts';
 import { providersRepo } from '../src/lib/server/db/repositories/providers.ts';
 import { defaultLlmDeps, generateStructured } from '../src/lib/server/llm/client.ts';
 import { LlmError } from '../src/lib/server/llm/errors.ts';
+import { parseCli } from './lib/cli.ts';
 
-const { values } = parseArgs({ options: { provider: { type: 'string' } } });
+const values = parseCli({
+	command: 'npm run llm:smoke --',
+	summary: 'One live structured call to a provider (manual; never in CI). Uses the real key from the environment.',
+	usage: ['--provider NAME    The provider to call (required)'],
+	example: '--provider Anthropic',
+	options: { provider: { type: 'string' } }
+});
 const db = getDb();
 const providers = providersRepo(db);
 if (values.provider === undefined) {

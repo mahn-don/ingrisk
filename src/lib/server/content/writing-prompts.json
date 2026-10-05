@@ -1,0 +1,365 @@
+{
+	"description": "Writing prompts for the Write (Viết) session shape. Hand-written; reviewed by the user. Each prompt fits learners whose level band is within band_min..band_max.",
+	"items": [
+		{
+			"id": "food-01",
+			"band_min": 1,
+			"band_max": 2,
+			"prompt_vi": "Hôm nay bạn đã ăn gì? Kể về bữa sáng, bữa trưa và bữa tối của bạn.",
+			"hint_en": "Use: For breakfast I ate ... / For lunch I had ... / In the evening I ...",
+			"min_words": 20,
+			"max_words": 40
+		},
+		{
+			"id": "food-02",
+			"band_min": 4,
+			"band_max": 5,
+			"prompt_vi": "Hãy hướng dẫn một người bạn nước ngoài cách nấu một món ăn Việt Nam mà bạn biết làm.",
+			"hint_en": "Use: First, ... / Then ... / After that ... / Finally ... (imperatives: cut, add, boil, fry)",
+			"min_words": 60,
+			"max_words": 90
+		},
+		{
+			"id": "eating-out-01",
+			"band_min": 2,
+			"band_max": 3,
+			"prompt_vi": "Kể về một quán ăn hoặc quán cà phê gần nhà mà bạn hay đến. Bạn thường gọi món gì?",
+			"hint_en": "Use: There is a ... near my house. / I often order ... / It costs about ...",
+			"min_words": 30,
+			"max_words": 50
+		},
+		{
+			"id": "eating-out-02",
+			"band_min": 5,
+			"band_max": 6,
+			"prompt_vi": "Viết một đánh giá ngắn về một nhà hàng bạn đã đến gần đây: món ăn, giá cả, phục vụ. Bạn có muốn quay lại không?",
+			"hint_en": "Use: Last week I went to ... / The food was ... but ... / I would (not) recommend it because ...",
+			"min_words": 80,
+			"max_words": 120
+		},
+		{
+			"id": "commuting-01",
+			"band_min": 1,
+			"band_max": 2,
+			"prompt_vi": "Bạn đi làm hoặc đi học bằng gì? Mất bao lâu?",
+			"hint_en": "Use: I go to work by ... / It takes about ... minutes.",
+			"min_words": 20,
+			"max_words": 40
+		},
+		{
+			"id": "commuting-02",
+			"band_min": 6,
+			"band_max": 7,
+			"prompt_vi": "Giao thông ở thành phố của bạn có vấn đề gì? Theo bạn, nên làm gì để việc đi lại dễ dàng hơn?",
+			"hint_en": "Use: One big problem is ... / This happens because ... / I think the city should ... / If more people ..., ...",
+			"min_words": 100,
+			"max_words": 150
+		},
+		{
+			"id": "work-01",
+			"band_min": 3,
+			"band_max": 4,
+			"prompt_vi": "Mô tả một ngày làm việc bình thường của bạn, từ lúc đến nơi làm việc đến lúc về nhà.",
+			"hint_en": "Use: I usually start work at ... / In the morning I ... / After lunch ... / I finish at ...",
+			"min_words": 40,
+			"max_words": 70
+		},
+		{
+			"id": "work-02",
+			"band_min": 7,
+			"band_max": 8,
+			"prompt_vi": "Viết email cho sếp để xin nghỉ hai ngày vào tuần sau. Giải thích lý do và cách bạn sắp xếp công việc khi vắng mặt.",
+			"hint_en": "Use: I am writing to ask for ... / The reason is that ... / While I am away, ... will ... / Please let me know if ...",
+			"min_words": 120,
+			"max_words": 180
+		},
+		{
+			"id": "family-01",
+			"band_min": 1,
+			"band_max": 2,
+			"prompt_vi": "Giới thiệu các thành viên trong gia đình bạn: họ là ai và họ làm gì?",
+			"hint_en": "Use: There are ... people in my family. / My father is a ... / My sister likes ...",
+			"min_words": 20,
+			"max_words": 40
+		},
+		{
+			"id": "family-02",
+			"band_min": 4,
+			"band_max": 5,
+			"prompt_vi": "Kể về một kỷ niệm đáng nhớ với ông bà hoặc bố mẹ của bạn.",
+			"hint_en": "Use: When I was ..., my grandmother ... / I remember that ... / It was special because ...",
+			"min_words": 60,
+			"max_words": 90
+		},
+		{
+			"id": "friends-01",
+			"band_min": 2,
+			"band_max": 3,
+			"prompt_vi": "Giới thiệu người bạn thân nhất của bạn. Hai bạn thường làm gì cùng nhau?",
+			"hint_en": "Use: My best friend is ... / We met ... / We often ... together.",
+			"min_words": 30,
+			"max_words": 50
+		},
+		{
+			"id": "friends-02",
+			"band_min": 5,
+			"band_max": 6,
+			"prompt_vi": "Nhắn tin cho một người bạn để rủ đi chơi cuối tuần này. Đề xuất địa điểm, thời gian và lý do bạn muốn đi.",
+			"hint_en": "Use: Are you free on ...? / How about going to ...? / We could ... / I think it would be fun because ...",
+			"min_words": 80,
+			"max_words": 120
+		},
+		{
+			"id": "phones-01",
+			"band_min": 3,
+			"band_max": 4,
+			"prompt_vi": "Bạn dùng điện thoại vào những việc gì mỗi ngày? Ứng dụng nào bạn dùng nhiều nhất?",
+			"hint_en": "Use: I use my phone to ... / The app I use most is ... because ... / I spend about ... hours ...",
+			"min_words": 40,
+			"max_words": 70
+		},
+		{
+			"id": "phones-02",
+			"band_min": 6,
+			"band_max": 7,
+			"prompt_vi": "Mạng xã hội có lợi và có hại như thế nào với cuộc sống của bạn? Hãy nêu ví dụ cụ thể.",
+			"hint_en": "Use: On the one hand, ... / On the other hand, ... / For example, ... / In my opinion, ...",
+			"min_words": 100,
+			"max_words": 150
+		},
+		{
+			"id": "health-01",
+			"band_min": 2,
+			"band_max": 3,
+			"prompt_vi": "Bạn làm gì để giữ sức khỏe? Kể về thói quen ăn uống và ngủ nghỉ của bạn.",
+			"hint_en": "Use: To stay healthy, I ... / I try to ... / I usually go to bed at ...",
+			"min_words": 30,
+			"max_words": 50
+		},
+		{
+			"id": "health-02",
+			"band_min": 7,
+			"band_max": 8,
+			"prompt_vi": "Kể về một lần bạn bị ốm và phải đi khám bệnh. Bạn cảm thấy thế nào, bác sĩ nói gì và bạn đã học được điều gì?",
+			"hint_en": "Use: A few months ago, I ... / The doctor told me to ... / Since then, I have ... / I realised that ...",
+			"min_words": 120,
+			"max_words": 180
+		},
+		{
+			"id": "sport-01",
+			"band_min": 1,
+			"band_max": 2,
+			"prompt_vi": "Bạn thích môn thể thao nào? Bạn có hay chơi hoặc xem không?",
+			"hint_en": "Use: I like ... / I play ... every ... / I sometimes watch ... on TV.",
+			"min_words": 20,
+			"max_words": 40
+		},
+		{
+			"id": "sport-02",
+			"band_min": 4,
+			"band_max": 5,
+			"prompt_vi": "Kể về lần đầu tiên bạn thử một môn thể thao hoặc một bài tập mới.",
+			"hint_en": "Use: The first time I tried ..., I ... / At first it was ... / Now I ...",
+			"min_words": 60,
+			"max_words": 90
+		},
+		{
+			"id": "weather-01",
+			"band_min": 1,
+			"band_max": 2,
+			"prompt_vi": "Hôm nay thời tiết ở chỗ bạn thế nào? Bạn thích thời tiết như thế nào nhất?",
+			"hint_en": "Use: Today it is ... / I like ... weather because ...",
+			"min_words": 20,
+			"max_words": 40
+		},
+		{
+			"id": "weather-02",
+			"band_min": 3,
+			"band_max": 4,
+			"prompt_vi": "Mô tả các mùa ở nơi bạn sống. Bạn thích mùa nào nhất và vì sao?",
+			"hint_en": "Use: In my city there are ... seasons. / In summer it is ... / My favourite season is ... because ...",
+			"min_words": 40,
+			"max_words": 70
+		},
+		{
+			"id": "shopping-01",
+			"band_min": 2,
+			"band_max": 3,
+			"prompt_vi": "Bạn thường mua đồ ăn ở đâu: chợ, siêu thị hay trên mạng? Vì sao?",
+			"hint_en": "Use: I usually buy food at ... / It is ... than ... / I like it because ...",
+			"min_words": 30,
+			"max_words": 50
+		},
+		{
+			"id": "shopping-02",
+			"band_min": 5,
+			"band_max": 6,
+			"prompt_vi": "Kể về một món đồ bạn mua trên mạng nhưng không như mong đợi. Bạn đã xử lý thế nào?",
+			"hint_en": "Use: Recently I ordered ... / When it arrived, ... / I contacted ... and ... / Next time I will ...",
+			"min_words": 80,
+			"max_words": 120
+		},
+		{
+			"id": "money-01",
+			"band_min": 3,
+			"band_max": 4,
+			"prompt_vi": "Mỗi tháng bạn tiêu tiền vào những việc gì nhiều nhất? Bạn có tiết kiệm không?",
+			"hint_en": "Use: Every month I spend most of my money on ... / I try to save ... / It is hard to ... because ...",
+			"min_words": 40,
+			"max_words": 70
+		},
+		{
+			"id": "money-02",
+			"band_min": 6,
+			"band_max": 7,
+			"prompt_vi": "Nếu bạn được tặng 50 triệu đồng, bạn sẽ dùng số tiền đó như thế nào? Giải thích lựa chọn của bạn.",
+			"hint_en": "Use: If I had ..., I would ... / First, I would ... / I would also ... because ...",
+			"min_words": 100,
+			"max_words": 150
+		},
+		{
+			"id": "travel-01",
+			"band_min": 2,
+			"band_max": 3,
+			"prompt_vi": "Kể về một nơi bạn đã đi du lịch. Bạn đi với ai và đã làm gì ở đó?",
+			"hint_en": "Use: Last year I went to ... with ... / We visited ... / The best part was ...",
+			"min_words": 30,
+			"max_words": 50
+		},
+		{
+			"id": "travel-02",
+			"band_min": 7,
+			"band_max": 8,
+			"prompt_vi": "Một người bạn nước ngoài sắp đến Việt Nam lần đầu. Hãy viết cho họ lời khuyên về nơi nên đến, món nên ăn và những điều cần chú ý.",
+			"hint_en": "Use: You should definitely ... / Don't forget to ... / Be careful when ... / If you have time, ...",
+			"min_words": 120,
+			"max_words": 180
+		},
+		{
+			"id": "study-01",
+			"band_min": 1,
+			"band_max": 2,
+			"prompt_vi": "Vì sao bạn học tiếng Anh? Bạn học tiếng Anh khi nào trong ngày?",
+			"hint_en": "Use: I learn English because ... / I study in the ... / I want to ...",
+			"min_words": 20,
+			"max_words": 40
+		},
+		{
+			"id": "study-02",
+			"band_min": 5,
+			"band_max": 6,
+			"prompt_vi": "Điều gì khó nhất với bạn khi học tiếng Anh? Bạn đã làm gì để khắc phục?",
+			"hint_en": "Use: The most difficult thing for me is ... / To improve, I have started ... / It helps me to ...",
+			"min_words": 80,
+			"max_words": 120
+		},
+		{
+			"id": "home-01",
+			"band_min": 2,
+			"band_max": 3,
+			"prompt_vi": "Mô tả căn phòng bạn thích nhất trong nhà. Trong phòng có những gì?",
+			"hint_en": "Use: My favourite room is ... / There is a ... next to ... / I like it because ...",
+			"min_words": 30,
+			"max_words": 50
+		},
+		{
+			"id": "home-02",
+			"band_min": 4,
+			"band_max": 5,
+			"prompt_vi": "Trong nhà bạn, ai làm việc nhà gì? Bạn có thấy cách chia việc như vậy là công bằng không?",
+			"hint_en": "Use: In my family, ... usually ... / I am responsible for ... / I think it is (not) fair because ...",
+			"min_words": 60,
+			"max_words": 90
+		},
+		{
+			"id": "city-01",
+			"band_min": 3,
+			"band_max": 4,
+			"prompt_vi": "Giới thiệu khu phố hoặc làng nơi bạn đang sống. Ở đó có gì hay?",
+			"hint_en": "Use: I live in ... / There are many ... / People there are ... / The thing I like most is ...",
+			"min_words": 40,
+			"max_words": 70
+		},
+		{
+			"id": "city-02",
+			"band_min": 6,
+			"band_max": 7,
+			"prompt_vi": "Bạn thích sống ở thành phố hay ở nông thôn hơn? So sánh và giải thích lý do.",
+			"hint_en": "Use: Living in the city is ... than ... / However, ... / Personally, I prefer ... because ...",
+			"min_words": 100,
+			"max_words": 150
+		},
+		{
+			"id": "festivals-01",
+			"band_min": 1,
+			"band_max": 2,
+			"prompt_vi": "Gia đình bạn thường làm gì vào dịp Tết?",
+			"hint_en": "Use: At Tet my family ... / We eat ... / I like Tet because ...",
+			"min_words": 20,
+			"max_words": 40
+		},
+		{
+			"id": "festivals-02",
+			"band_min": 5,
+			"band_max": 6,
+			"prompt_vi": "Kể về một dịp lễ hoặc Tết đáng nhớ nhất của bạn. Điều gì làm nó đặc biệt?",
+			"hint_en": "Use: The most memorable Tet was ... / That year, ... / What made it special was ...",
+			"min_words": 80,
+			"max_words": 120
+		},
+		{
+			"id": "hobbies-01",
+			"band_min": 2,
+			"band_max": 3,
+			"prompt_vi": "Bạn thường làm gì vào thời gian rảnh? Bạn bắt đầu sở thích đó từ khi nào?",
+			"hint_en": "Use: In my free time, I ... / I started ... when I was ... / It makes me feel ...",
+			"min_words": 30,
+			"max_words": 50
+		},
+		{
+			"id": "hobbies-02",
+			"band_min": 4,
+			"band_max": 5,
+			"prompt_vi": "Giới thiệu một bộ phim, cuốn sách hoặc bài hát bạn thích gần đây và nói vì sao người khác nên thử.",
+			"hint_en": "Use: Recently I watched/read/listened to ... / It is about ... / You should try it because ...",
+			"min_words": 60,
+			"max_words": 90
+		},
+		{
+			"id": "environment-01",
+			"band_min": 3,
+			"band_max": 4,
+			"prompt_vi": "Ở nơi bạn sống, rác và túi nhựa có phải là vấn đề không? Bạn làm gì để giảm rác?",
+			"hint_en": "Use: In my area, ... is a big problem. / I try to ... / For example, I ...",
+			"min_words": 40,
+			"max_words": 70
+		},
+		{
+			"id": "environment-02",
+			"band_min": 7,
+			"band_max": 8,
+			"prompt_vi": "Theo bạn, người dân, doanh nghiệp và chính quyền địa phương nên làm gì để giảm ô nhiễm không khí ở các thành phố lớn?",
+			"hint_en": "Use: Air pollution is caused by ... / To reduce it, ... should ... / It would also help if ... / Overall, ...",
+			"min_words": 120,
+			"max_words": 180
+		},
+		{
+			"id": "plans-01",
+			"band_min": 4,
+			"band_max": 5,
+			"prompt_vi": "Bạn có kế hoạch gì cho năm tới? Hãy kể về một mục tiêu bạn muốn đạt được.",
+			"hint_en": "Use: Next year I am going to ... / My main goal is to ... / To do this, I will ...",
+			"min_words": 60,
+			"max_words": 90
+		},
+		{
+			"id": "plans-02",
+			"band_min": 6,
+			"band_max": 7,
+			"prompt_vi": "Năm năm nữa bạn muốn cuộc sống của mình như thế nào? Bạn cần thay đổi điều gì từ bây giờ?",
+			"hint_en": "Use: In five years, I hope I will ... / I would like to ... / To get there, I need to ... / The hardest part will be ...",
+			"min_words": 100,
+			"max_words": 150
+		}
+	]
+}

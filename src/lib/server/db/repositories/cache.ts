@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { DbOrTx } from '../client.ts';
 import { CARD_KINDS, generatedCache } from '../schema.ts';
 
@@ -8,6 +8,12 @@ export type NewCacheItem = Omit<
 	typeof generatedCache.$inferInsert,
 	'id' | 'validated' | 'validationNotes' | 'servedAt'
 >;
+
+export interface ParamsStock {
+	paramsHash: string;
+	levelBand: number;
+	n: number;
+}
 
 export interface StockEntry {
 	kind: CacheKind;
@@ -27,6 +33,49 @@ export function cacheRepo(db: DbOrTx) {
 				.onConflictDoNothing({ target: generatedCache.contentHash })
 				.returning()
 				.get();
+		},
+		/**
+		 * Store a generated item, validated or rejected (rejections keep their notes for inspection).
+		 * Returns undefined if an item with the same content_hash exists.
+		 */
+		insert(item: NewCacheItem & { validated: boolean; validationNotes: string | null }): CacheItem | undefined {
+			return db.insert(generatedCache).values(item).onConflictDoNothing({ target: generatedCache.contentHash }).returning().get();
+		},
+		/** Which of these content hashes are already stored (any kind, validated or not). */
+		existingHashes(hashes: readonly string[]): Set<string> {
+			const found = new Set<string>();
+			for (let i = 0; i < hashes.length; i += 500) {
+				const rows = db
+					.select({ h: generatedCache.contentHash })
+					.from(generatedCache)
+					.where(inArray(generatedCache.contentHash, hashes.slice(i, i + 500)))
+					.all();
+				for (const row of rows) found.add(row.h);
+			}
+			return found;
+		},
+		/**
+		 * Item counts of a kind per params hash and band: validated and unserved (the stock), or with
+		 * `includeServed`, every validated item ever made (used to spread topics).
+		 */
+		countByParams(kind: CacheKind, options: { includeServed?: boolean } = {}): ParamsStock[] {
+			const conditions = [eq(generatedCache.kind, kind), eq(generatedCache.validated, true)];
+			if (!options.includeServed) conditions.push(isNull(generatedCache.servedAt));
+			return db
+				.select({ paramsHash: generatedCache.paramsHash, levelBand: generatedCache.levelBand, n: count() })
+				.from(generatedCache)
+				.where(and(...conditions))
+				.groupBy(generatedCache.paramsHash, generatedCache.levelBand)
+				.all();
+		},
+		/** Items of a kind by validation status, newest first (evaluation sheets). */
+		byKind(kind: CacheKind, validated: boolean): CacheItem[] {
+			return db
+				.select()
+				.from(generatedCache)
+				.where(and(eq(generatedCache.kind, kind), eq(generatedCache.validated, validated)))
+				.orderBy(desc(generatedCache.id))
+				.all();
 		},
 		/**
 		 * Take up to `n` validated, unserved items of a kind and band, oldest first, and mark them
