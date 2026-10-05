@@ -33,11 +33,13 @@ src/
     server/              server-only code; never imported by client code
       db/                Drizzle schema, migrations/, repositories/ (intent-level functions; callers
                          never build queries), client.ts (connection, pragmas, migrate)
-      llm/               provider client: wire formats, structured modes, retry/fallback, call log
+      llm/               provider client: wire formats, structured modes, retry/fallback, call log;
+                         prompts/ (each module exports PROMPT_VERSION)
       srs/               ts-fsrs wrapper: scheduler, review, auto-rating, queue (never reads the clock)
-      generation/        exercise generation + validation pipeline
+      generation/        content import; exercise generation + validation (cloze/: the cloze pool)
       content/           generated JSON assets (NGSL, Tatoeba pairs, pseudo-words); built by
-                         `npm run content:prepare`, never edited by hand
+                         `npm run content:prepare`, never edited by hand. Exception:
+                         blocklist.txt (hand-maintained; used by `content:import`)
     components/          shared Svelte components
     messages/vi.ts       every user-facing string (export `t`), grouped by screen
   routes/
@@ -66,6 +68,9 @@ Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e test
 | `npm run test:e2e` | Playwright (builds and previews the app first) |
 | `npm run content:prepare` | Rebuild `src/lib/server/content/*.json` from `tool/raw/` (deterministic) |
 | `npm run content:tatoeba-pairs` | Re-join the Tatoeba exports into `tool/raw/tatoeba-eng-vie.tsv` |
+| `npm run content:import` | Upsert the content JSON into the database (idempotent; `-- --reblock` re-applies the blocklist) |
+| `npm run cloze:build -- ...` | Build the cloze pool (`--bands 1-3 --types ... --limit --provider --max-calls --dry-run`) |
+| `npm run eval:cloze -- --n 30` | Write a cloze evaluation sheet to `tmp/eval/` for a human to grade |
 | `npm run db:generate` | Generate a SQL migration from `src/lib/server/db/schema.ts` (commit it) |
 | `npm run db:migrate` | Apply pending migrations to `DATABASE_PATH` (default `data/app.db`) |
 | `npm run db:studio` | Browse the database with Drizzle Studio |
@@ -105,6 +110,8 @@ Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e test
 ## LLM
 
 - All LLM output is validated with Zod locally; provider-side schema enforcement is never trusted alone.
+- Tests and `--dry-run` use a fake `fetch` (`llm/test-helpers.ts`, `generation/cloze/canned-llm.ts`),
+  never a live endpoint. `cloze:build` is capped by `--max-calls` and `LLM_DAILY_CALL_CAP`.
 
 ## Environment
 

@@ -233,15 +233,29 @@ lexemes(id, headword UNIQUE, pos, ngsl_rank, freq_band, forms, supplementary,
 -- forms: JSON array of every inflected form; supplementary: NGSL days/months/number words.
 collocations(id, lexeme_id → lexemes ON DELETE CASCADE, chunk, example_en, example_vi)
 sentences(id, en_text, vi_text, source, tatoeba_id_en UNIQUE, tatoeba_id_vi,
-          ngsl_band_max, off_list_count, license_tag, level_band)
--- tatoeba_id_en is NULL for LLM-generated sentences.
+          ngsl_band_max, off_list_count, license_tag, level_band,
+          blocked, blocked_reason, has_stock_names)
+-- tatoeba_id_en is NULL for LLM-generated sentences. level_band = max(1, ngsl_band_max ?? 1).
+-- blocked: matched the content blocklist (kept, never deleted; blocked_reason names the term);
+-- has_stock_names: the English contains Tom or Mary. (last three: migration 0003)
+
+cloze_items(id, sentence_id → sentences, gap_type, token_index, answer, options,
+            answer_vi, lexeme_id → lexemes, grammar_topic_id → grammar_topics,
+            level_band, rule_ok, critic_ok, validated, rejection_reason, critic_notes,
+            prompt_version, model, content_hash UNIQUE, created_at)
+-- The validated cloze pool (Part II §5; migration 0003). All references ON DELETE RESTRICT.
+-- token_index: the gap's index in the sentence's token list; options: JSON array of 4 strings
+-- in display order ('—' = no word); critic_ok is NULL when the rules already failed.
+-- Rejected items are kept (validated = 0) for inspection.
 
 cards(id, kind, lexeme_id → lexemes, sentence_id → sentences,
-      grammar_topic_id → grammar_topics,          -- all ON DELETE RESTRICT
+      grammar_topic_id → grammar_topics,
+      cloze_item_id → cloze_items,                -- all ON DELETE RESTRICT
       prompt_mode,
       due, stability, difficulty, elapsed_days, scheduled_days, learning_steps,
       reps, lapses, state, last_review)           -- every field of ts-fsrs Card
 -- UNIQUE (kind, lexeme_id, sentence_id, grammar_topic_id), NULLs counted as 0.
+-- cloze_item_id (migration 0003) is UNIQUE when not NULL: a pool item becomes at most one card.
 review_logs(id, card_id → cards ON DELETE RESTRICT,
             rating, state, due, stability, difficulty, elapsed_days,
             last_elapsed_days, scheduled_days, learning_steps, review,
@@ -254,7 +268,8 @@ sessions(id, client_session_id UNIQUE, started_at, ended_at, budget_min, shape,
 
 generated_cache(id, kind, params_hash, content_hash UNIQUE, level_band,
                 payload_json, model, created_at, validated, validation_notes,
-                served_at)
+                served_at, prompt_version)
+-- prompt_version (migration 0003): the version string of the prompt module that produced it.
 
 writing_submissions(id, session_id → sessions ON DELETE SET NULL, prompt,
                     user_text, corrected_text, errors_json, cefr_estimate, status,
@@ -264,9 +279,9 @@ grammar_topics(id, code UNIQUE, name_vi, name_en, l1_interference)
 -- seeded with the 10 codes of Part I §6.
 ```
 
-Indexes: `cards(due)`, `review_logs(card_id, review)`, `llm_calls(created_at)`, `collocations(lexeme_id)`, `generated_cache(kind, params_hash)`, `generated_cache(kind, validated, served_at)`, `writing_submissions(status)`, plus the unique indexes above.
+Indexes: `cards(due)`, `review_logs(card_id, review)`, `sentences(blocked, level_band)`, `cloze_items(validated, gap_type, level_band)`, `cloze_items(sentence_id)`, `llm_calls(created_at)`, `collocations(lexeme_id)`, `generated_cache(kind, params_hash)`, `generated_cache(kind, validated, served_at)`, `writing_submissions(status)`, plus the unique indexes above.
 
-Enumerations: `kind` ∈ cloze | translate | grammar | reading | error (cards and generated_cache); `status` ∈ queued | scored | failed; `wire_format` ∈ openai | anthropic; `structured_mode` ∈ json_schema | tool | json_prompt; `shape` ∈ quick | read | write; `writing_status` ∈ none | queued | scored; `feedback_mode` ∈ direct | indirect; `prompt_mode` ∈ choice | typing; `state` ∈ New | Learning | Review | Relearning and `rating` ∈ Manual | Again | Hard | Good | Easy (ts-fsrs `State` and `Rating` names); CEFR columns ∈ A1 … C2; `code` ∈ the taxonomy codes.
+Enumerations: `kind` ∈ cloze | translate | grammar | reading | error (cards and generated_cache); `status` ∈ queued | scored | failed; `wire_format` ∈ openai | anthropic; `structured_mode` ∈ json_schema | tool | json_prompt; `shape` ∈ quick | read | write; `writing_status` ∈ none | queued | scored; `feedback_mode` ∈ direct | indirect; `prompt_mode` ∈ choice | typing; `state` ∈ New | Learning | Review | Relearning and `rating` ∈ Manual | Again | Hard | Good | Easy (ts-fsrs `State` and `Rating` names); CEFR columns ∈ A1 … C2; `code` ∈ the taxonomy codes; `gap_type` ∈ lexical | article | preposition | verb_form.
 
 Connection (`src/lib/server/db/client.ts`): `DATABASE_PATH` (default `data/app.db`), pragmas `journal_mode = WAL` (required by Litestream), `foreign_keys = ON`, `busy_timeout = 5000`, `synchronous = NORMAL`. Migrations run at server start from the SvelteKit `init` hook; a failed migration stops the server.
 
@@ -306,27 +321,34 @@ Surface a clear Vietnamese error in the UI if all providers fail. Do not hard-co
 
 ### 5. Generation and the validation pipeline
 
-Generation is batch and ahead of time, never during a session. A cron job at 03:00 (Asia/Ho_Chi_Minh) calls `/api/cron/prefetch` (guarded by a secret), filling `generated_cache` to N items per kind based on `known_band_ceiling`.
+Generation is batch and ahead of time, never during a session. Every prompt module in `src/lib/server/llm/prompts/` exports a `PROMPT_VERSION` string, stored with every item it produces (`cloze_items.prompt_version`, `generated_cache.prompt_version`), so a changed prompt can be traced and its items rebuilt.
 
-Every generated item passes:
+**Content import** (`npm run content:import`, Phase 5a). Reads the Phase 1 JSON with `fs` (never bundled into app code) and upserts idempotently: `ngsl.json` → `lexemes` by headword (supplementary words that are also ranked headwords, `may` and `march`, are skipped; glosses added later are never overwritten); `tatoeba-en-vi.json` → `sentences` by `tatoeba_id_en`. A second run changes nothing. Sentences matching `src/lib/server/content/blocklist.txt` (one term per line, `prefix*` allowed, matched on lemmas via the NGSL form map, so "killed" matches `kill`) are imported with `blocked = 1` and never deleted; `--reblock` re-applies the current list to every row. The import reports the blocked count and the top 20 matching terms.
+
+**The cloze pool** (`npm run cloze:build`, Phase 5a). Cloze items are not generated sentences: they are gaps in real Tatoeba sentences, stored in `cloze_items`.
+
+1. **Candidates** (`generation/cloze/candidates.ts`, deterministic). Eligible sentences: not blocked, 4–15 words, `off_list_count` ≤ 2. At most one lexical and one grammar candidate per sentence.
+   - *lexical*: a content word whose lemma is in NGSL and not in the function-word stoplist (`stoplist.ts`); never a capitalized word mid-sentence, never part of a hyphenated compound; the highest band ≤ sentence band + 1 wins. Item band = max(sentence band, lemma band); `lexeme_id` is linked.
+   - *article* (ART): options `a, an, the, —`.
+   - *preposition* (PRE): distractors from a fixed confusion table (`prepositions.ts`); the infinitive "to" is not a preposition.
+   - *verb_form*: a lemma with at least four real forms (one in -ing); options are other forms of the same lemma that occur in the sentence corpus and are real words (NGSL form lists include nonstandard forms such as "makeing"). No modals, no noun uses after a determiner. Topic SVA when the gap is present simple after a third-person subject, else TNS.
+   - Selection is seeded and stable: candidates are bucketed by (gap type, band), each bucket ordered by content hash, and taken round-robin, so a run spreads across types and bands.
+2. **Distractors** (lexical gaps only; prompt `llm/prompts/cloze-distractors.ts`). 10 items per call; each gives the sentence with `___`, the answer and the Vietnamese sentence, and asks for 3 distractors (same part of speech and inflection, similar frequency, plausible but clearly wrong) with a one-line reason each, plus `answer_vi`. All schema fields are required; the array size is not sent to Anthropic (Part II §4) and Zod enforces exactly 3 locally.
+3. **Rules** (`generation/cloze/rules.ts`, deterministic): 4 options, distinct case-insensitively, exactly one equal to the answer; each a single token or `—`; lowercase unless the gap is sentence-initial, then all four capitalized; the answer is exactly at `token_index`; for lexical gaps, no distractor is a form of the answer's lemma, every distractor is a real word (the word list or an NGSL headword) and none is on the blocklist. A failure stores `rule_ok = 0` with `rejection_reason = rule:<code> (...)`.
+4. **Blind critic** (prompt `llm/prompts/cloze-critic.ts`; `generation/cloze/critic.ts`). The sentence is shown filled with each of the four options, labelled A–D in display order, never saying which is intended (no translation either). For each version: grammatical? natural? meaning plausible? An item is accepted only if exactly one version is acceptable on all three and it is the answer. 10 items per call.
+5. **Store.** Options are shuffled with a seed derived from the item's content hash. Rule and critic failures are stored with `validated = 0`; items whose LLM call failed (schema error after repair, refusal, exhausted retries, an item missing from the answer) are not stored, so the next run retries them. Existing `content_hash` values are skipped.
+
+**Cost guards.** `--max-calls` (default 50) stops the run once it has made that many HTTP attempts (`llm_calls` rows; checked before each batch, so one batch's retries may overshoot slightly). The run refuses to start when `llm_calls` already holds `LLM_DAILY_CALL_CAP` (env, default 500) rows in the last 24 h, and stops if it would reach the cap. `--dry-run` runs the whole pipeline on an in-memory copy of the content with a canned LLM (no network, no writes).
+
+**Evaluation** (`npm run eval:cloze -- --n 30`) writes `tmp/eval/cloze-<timestamp>.md`: a table of `n` random validated items (sentence with gap, options, answer, `answer_vi`, gap type, band, a column to mark bad items) and 10 random rejected items with their reasons. Phase 5's hard gate is a human finding at most 1 bad item among 30.
+
+**Other generated kinds** (Phase 5b). A cron job at 03:00 (Asia/Ho_Chi_Minh) calls `/api/cron/prefetch` (guarded by a secret), filling `generated_cache` to N items per kind based on `known_band_ceiling`. Every generated item passes:
 1. **Schema validation** with Zod.
 2. **Rule checks:** the gap word occurs in the sentence; exactly one option is correct; distractors differ from each other and from the answer; content words are within the target band ceiling; the Vietnamese translation is non-empty and differs from the English.
 3. **Critic pass** (optional): a second cheap call asking "is this item unambiguous and correctly keyed?" Enable it for any kind with a high rejection rate.
 4. Store with `validated = true` only if all checks pass; otherwise store with notes for inspection and regenerate.
 
 Threshold: over 95% pass rate per kind before relying on it.
-
-**Cloze schema**
-```ts
-const ClozeItem = z.object({
-  sentence_en: z.string(),
-  gap_word: z.string(),
-  distractors: z.array(z.string()).length(3),
-  vi_translation: z.string(),
-  target_lexeme: z.string(),
-  cefr_band: z.enum(['A1','A2','B1','B2','C1','C2'])
-}).strict();
-```
 
 **Writing-feedback schema**
 ```ts
@@ -419,7 +441,7 @@ Vietnamese is a small language on Tatoeba: expect a few thousand usable EN–VI 
 - **One commit per phase**, small diffs, secret scanning on.
 - **Review subagents** get a bounded question: "Compared with the phase plan, report only correctness defects and unmet requirements. No style comments, no architectural suggestions, no new features."
 
-### 12 phases (0–11)
+### 12 phases (0–11; Phase 5 is split into 5a and 5b)
 
 Dependency order: data and engines first, app shell and deploy in the middle, features last. Deploy sits at Phase 7 so every later phase ends with a real deploy, surfacing infrastructure problems early instead of at the end.
 
@@ -572,13 +594,27 @@ This phase produces asset files with a one-off script in `tool/`. It adds no app
 
 ---
 
-#### Phase 5 — Generation and validation pipeline
+#### Phase 5a — Content import and the cloze pipeline
 
-> Build `src/lib/server/generation/`.
+> Build the content import and the cloze pool (design in Part II §5; plan in `plans/phase-05a.md`).
 >
-> Import the Phase 1 assets from `src/lib/server/content/` on first run: `ngsl.json` → `lexemes` with `freq_band` and `license_tag`; `tatoeba-en-vi.json` → `sentences` with `source='tatoeba'` and `license_tag`, using its `ngsl_band_max` and `off_list_count` fields to set `level_band`.
+> - **Import:** `npm run content:import` upserts `ngsl.json` → `lexemes` and `tatoeba-en-vi.json` → `sentences` idempotently, with `level_band = max(1, ngsl_band_max ?? 1)`, `has_stock_names`, and the blocklist (`src/lib/server/content/blocklist.txt`, matched on lemmas) marking sentences `blocked` without deleting them; `--reblock` re-applies it.
+> - **Data model:** `cloze_items`, `cards.cloze_item_id` (unique when not null), `generated_cache.prompt_version`, sentences `blocked` / `blocked_reason` / `has_stock_names`.
+> - **Pipeline:** deterministic candidates (lexical, article, preposition, verb_form) → LLM distractors for lexical gaps (10 per call) → deterministic rules → blind critic (10 per call) → store, failures included. Every prompt module exports a version string.
+> - **Commands:** `npm run cloze:build -- [--bands 1-3] [--types ...] [--limit 200] [--provider name] [--max-calls 50] [--dry-run]` with cost guards (`--max-calls`, `LLM_DAILY_CALL_CAP`), and `npm run eval:cloze -- [--n 30]`.
 >
-> Implement generators for: cloze, reading passage plus 2 comprehension questions, VI→EN translation task, error-correction drill targeting a given grammar topic code, and writing feedback. Each gets a prompt template in `src/lib/server/llm/prompts/` and a Zod schema. The cloze and writing-feedback schemas are in Part II §5 of `docs/architecture.md`.
+> Test with a mocked LLM only: candidates, every rule, the critic's acceptance logic, batching and per-batch failure isolation, cost guards, and the import.
+
+**Result:** content imported, a validated cloze pool spread across gap types and bands.
+**Check:** `content:import` is a no-op the second time; `cloze:build -- --dry-run` runs end to end; in `eval:cloze`, a human finds at most 1 bad item among 30 validated items.
+
+---
+
+#### Phase 5b — Other generators and prefetch
+
+> Build the rest of `src/lib/server/generation/` (the cloze pool is Phase 5a).
+>
+> Implement generators for: reading passage plus 2 comprehension questions, VI→EN translation task, error-correction drill targeting a given grammar topic code, and writing feedback. Each gets a prompt template in `src/lib/server/llm/prompts/` (exporting a version string, as in Phase 5a) and a Zod schema. The writing-feedback schema is in Part II §5 of `docs/architecture.md`.
 >
 > Implement the validation pipeline: Zod parse → rule checks (gap word present in the sentence; exactly one correct option; distractors distinct from each other and from the answer; content words within the target band ceiling; Vietnamese translation present and different from the English) → store in `generated_cache` with `validated` and `validation_notes`.
 >
@@ -586,7 +622,7 @@ This phase produces asset files with a one-off script in `tool/`. It adds no app
 >
 > Add `npm run eval:generation` — generates 30 items, runs validation, prints the pass rate per kind.
 
-**Result:** content imported, generators working, validation pipeline, prefetch endpoint.
+**Result:** generators working, validation pipeline, prefetch endpoint.
 **Check:** run the eval; the pass rate must exceed 95% per kind. **Read 10 accepted items yourself** — validation catches structure, not teaching quality.
 
 ---
@@ -714,7 +750,7 @@ Deploy early, while the app is nearly empty. Infrastructure problems are much ch
 |---|---|
 | 1 | Pseudo-word list reviewed by hand; Tatoeba pair count known |
 | 3 | Intervals grow sensibly in a manual walkthrough |
-| 5 | Validation pass rate over 95% per kind, **and** 10 items read by a human |
+| 5 | In `eval:cloze`, a human finds at most 1 bad item among 30 validated items |
 | 7 | Database restored from backup successfully once |
 | 9 | A full session completes with the network cut mid-way |
 

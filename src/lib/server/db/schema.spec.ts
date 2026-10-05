@@ -51,6 +51,7 @@ describe('migrations', () => {
 		expect(tableNames(db)).toEqual([
 			'__drizzle_migrations',
 			'cards',
+			'cloze_items',
 			'collocations',
 			'generated_cache',
 			'grammar_topics',
@@ -182,8 +183,14 @@ describe('migrations', () => {
 describe('schema guards', () => {
 	it('has no column that could hold a secret', () => {
 		const db = createTestDb();
-		// Allowed: env_key_name (a variable *name*) and the llm_calls token *counts* (INTEGER only).
-		const allowed = new Set(['llm_providers.env_key_name', 'llm_calls.input_tokens', 'llm_calls.output_tokens']);
+		// Allowed: env_key_name (a variable *name*), the llm_calls token *counts* and the cloze
+		// gap position (INTEGER only, checked below).
+		const allowed = new Set([
+			'llm_providers.env_key_name',
+			'llm_calls.input_tokens',
+			'llm_calls.output_tokens',
+			'cloze_items.token_index'
+		]);
 		const offending = tableNames(db).flatMap((table) =>
 			columnNames(db, table)
 				.filter((c) => /key|secret|token|password/i.test(c) && !allowed.has(`${table}.${c}`))
@@ -195,6 +202,10 @@ describe('schema guards', () => {
 			(db.$client.pragma('table_info(llm_calls)') as { name: string; type: string }[]).map((c) => [c.name, c.type.toLowerCase()])
 		);
 		expect([types.input_tokens, types.output_tokens]).toEqual(['integer', 'integer']);
+		const clozeTypes = (db.$client.pragma('table_info(cloze_items)') as { name: string; type: string }[]).find(
+			(c) => c.name === 'token_index'
+		);
+		expect(clozeTypes?.type.toLowerCase()).toBe('integer');
 	});
 
 	it('allows exactly one settings row and one profile row', () => {

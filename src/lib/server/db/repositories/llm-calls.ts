@@ -1,4 +1,4 @@
-import { asc, count, gte, sql } from 'drizzle-orm';
+import { asc, count, gt, gte, sql } from 'drizzle-orm';
 import type { DbOrTx } from '../client.ts';
 import { llmCalls } from '../schema.ts';
 
@@ -35,6 +35,30 @@ export function llmCallsRepo(db: DbOrTx) {
 				})
 				.from(llmCalls)
 				.where(gte(llmCalls.createdAt, since))
+				.groupBy(llmCalls.providerId, llmCalls.model)
+				.orderBy(asc(llmCalls.providerId), asc(llmCalls.model))
+				.all();
+		},
+		/** Highest row id so far (0 when empty): a baseline for counting one run's calls. */
+		maxId(): number {
+			return db.select({ id: sql<number>`coalesce(max(${llmCalls.id}), 0)` }).from(llmCalls).get()?.id ?? 0;
+		},
+		/** HTTP attempts recorded after row `id`. */
+		countAfterId(id: number): number {
+			return db.select({ n: count() }).from(llmCalls).where(gt(llmCalls.id, id)).get()?.n ?? 0;
+		},
+		/** Token totals per provider and model for rows after `id`. */
+		usageAfterId(id: number): UsageEntry[] {
+			return db
+				.select({
+					providerId: llmCalls.providerId,
+					model: llmCalls.model,
+					calls: count(),
+					inputTokens: sql<number>`coalesce(sum(${llmCalls.inputTokens}), 0)`,
+					outputTokens: sql<number>`coalesce(sum(${llmCalls.outputTokens}), 0)`
+				})
+				.from(llmCalls)
+				.where(gt(llmCalls.id, id))
 				.groupBy(llmCalls.providerId, llmCalls.model)
 				.orderBy(asc(llmCalls.providerId), asc(llmCalls.model))
 				.all();

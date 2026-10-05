@@ -1,0 +1,62 @@
+# Content blocklist for imported sentences (hand-maintained; Phase 5a).
+# One term per line; "#" starts a comment; "word*" matches any word starting with "word".
+# NGSL headwords match all their forms (kill -> killed, killing). Matching sentences are imported
+# with blocked = 1 and never deleted: edit this file, then `npm run content:import -- --reblock`.
+
+# Profanity and slurs
+fuck*
+shit*
+bitch*
+bastard*
+asshole*
+cunt*
+whore*
+slut*
+piss*
+crap
+damn*
+dick
+cock
+wank*
+
+# Sexual content
+sex
+sexy
+sexual*
+porn*
+naked
+nude
+prostitut*
+orgasm*
+erotic*
+condom*
+virgin
+rape*
+molest*
+
+# Suicide and self-harm
+suicid*
+overdose*
+
+# Drugs
+drug
+cocaine
+heroin
+marijuana
+cannabis
+meth
+weed
+
+# Violence against people
+kill
+murder*
+shoot
+stab*
+strangle*
+torture*
+gun
+bomb
+terroris*
+massacre*
+assassin*
+behead*

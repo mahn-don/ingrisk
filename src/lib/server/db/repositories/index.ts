@@ -2,11 +2,14 @@
 import { getDb, type DbOrTx } from '../client.ts';
 import { cacheRepo } from './cache.ts';
 import { cardsRepo } from './cards.ts';
+import { clozeItemsRepo } from './cloze-items.ts';
 import { grammarTopicsRepo } from './grammar-topics.ts';
+import { lexemesRepo } from './lexemes.ts';
 import { llmCallsRepo } from './llm-calls.ts';
 import { profileRepo } from './profile.ts';
 import { providersRepo } from './providers.ts';
 import { reviewLogsRepo } from './review-logs.ts';
+import { sentencesRepo } from './sentences.ts';
 import { sessionsRepo } from './sessions.ts';
 import { settingsRepo } from './settings.ts';
 import { writingRepo } from './writing.ts';
@@ -23,7 +26,10 @@ export function createRepositories(db: DbOrTx) {
 		writing: writingRepo(db),
 		sessions: sessionsRepo(db),
 		grammarTopics: grammarTopicsRepo(db),
-		llmCalls: llmCallsRepo(db)
+		llmCalls: llmCallsRepo(db),
+		lexemes: lexemesRepo(db),
+		sentences: sentencesRepo(db),
+		clozeItems: clozeItemsRepo(db)
 	};
 }
 
