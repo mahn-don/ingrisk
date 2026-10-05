@@ -2,7 +2,7 @@
 
 **Revision 3 (web + VPS).** Supersedes the earlier Flutter/mobile design. The learning methodology carries over unchanged; the technical design and roadmap are rewritten for a web app on a VPS.
 
-**What it is:** a personal, single-user, non-commercial web app that teaches English **reading, writing, vocabulary and grammar** to a Vietnamese speaker. No audio of any kind, no microphone. Sessions fit a 5–10 minute gap and are used on a phone as an installed PWA. The UI is entirely in Vietnamese; code, comments, docs and commit messages are in English.
+**What it is:** a personal, single-user, non-commercial web app that teaches English **reading, writing, vocabulary and grammar** to a Vietnamese speaker. No audio of any kind, no microphone. Sessions fit a 5–10 minute gap and are used in a phone's browser, always online. The UI is entirely in Vietnamese; code, comments, docs and commit messages are in English.
 
 **How to use this document (for Claude Code):** this is the single source of truth for the project. Part I is the learning design, Part II the technical architecture, Part III the phased build plan with the prompt for each phase. When working on a phase, read Part II and that phase's section in Part III; consult Part I when the phase references it. Do not build anything outside the current phase's scope.
 
@@ -14,7 +14,7 @@
 |---|---|---|
 | Runs on | The user's phone | A VPS in Singapore |
 | API keys | On the device, not truly hideable | In `.env` on the server; the client never sees them |
-| Offline | Fully offline | Tolerates flaky connections; not fully offline |
+| Offline | Fully offline | No offline mode: browser only, always online |
 | Exercise prefetch | Job runs when on Wi-Fi | Cron at 03:00, content always ready |
 | FSRS | Hand-ported | `ts-fsrs` library |
 | Dev loop | Rebuild and reinstall on device | Edit, refresh the browser |
@@ -23,7 +23,11 @@
 
 **New risk:** the app is on the public internet. Without a login gate, anyone who finds the domain can use it, which means spending the owner's LLM credits. **Authentication is mandatory**, and it lands in Phase 6, before the first deploy.
 
-**What is lost:** true offline use. It is compensated for by sending the whole session's content to the client when the session starts, running the session entirely client-side, and submitting results once at the end. Losing signal mid-session is fine; a whole flight is not.
+**What is lost:** offline use. There is **no offline mode** and no installable app (PWA): the app is used in a mobile browser and assumes a connection. A session still starts with one request that returns its whole content and ends with one request that submits the results, so a session is cheap on the network.
+
+### Decisions
+
+- **Browser-only, always online, HTTP on the server's IP** (Phase 6 amendment, the owner's explicit decision). The app runs at `http://<server IP>:3000` with `COOKIE_SECURE=false`; the PWA (manifest, service worker, icons) and offline resilience are dropped. HTTPS can be added later through deployment configuration only (e.g. Tailscale or a Cloudflare Tunnel in front, then `ORIGIN=https://…` and `COOKIE_SECURE=true`), with no code changes.
 
 ---
 
@@ -155,7 +159,7 @@ Rigid daily streaks cause anxiety and abandonment after one missed day. Duolingo
 | Password hashing | **@node-rs/argon2** | Prebuilt binaries, no native build step |
 | UI | Tailwind + a few hand-written components | No heavy UI library needed |
 | Tests | Vitest + Playwright | Claude Code can run both itself |
-| Web server | **Caddy** | Automatic TLS, five-line config |
+| Web server | Node (`adapter-node`) on `0.0.0.0:3000` | Plain HTTP on the IP for now (see Part 0, Decisions); HTTPS later via deployment config |
 | Process manager | systemd | Restarts on failure, logs via journalctl |
 | Backup | **Litestream** → Cloudflare R2 or Backblaze B2 | Continuous SQLite replication |
 
@@ -186,7 +190,7 @@ src/
       cron/prefetch/     # called by cron, guarded by a secret
 tool/                    # one-off data preparation scripts
 data/                    # app.db (never committed)
-deploy/                  # Caddyfile, systemd unit, Litestream config
+deploy/                  # systemd unit, Litestream config, deploy script, crontab
 docs/                    # this document
 plans/                   # per-phase plans and roadmap status
 ```
@@ -406,8 +410,12 @@ Constraining `topic_code` to the enum is what makes error mining work: free-text
 ### 6. Authentication and safety
 
 The app is on the public internet, so:
-- **A single password gate.** Hash with argon2, store the hash in env. Session cookie is `httpOnly`, `secure`, `sameSite=lax`, valid 30 days.
-- The guard lives in `+layout.server.ts` of the `(app)` route group, protecting everything in it from one chokepoint. Guarding routes individually means one forgotten route is exposed.
+- **A single password gate.** The password's argon2id hash (`npm run auth:hash`, which prompts twice with hidden input) lives in `APP_PASSWORD_HASH`. Unset or not an argon2id hash means nobody can log in and every page stays closed: it fails closed.
+- **The chokepoint is `handle` in `src/hooks.server.ts`**, not a layout: layout loads do not run for `+server.ts` endpoints, so a layout guard would leave `/api/*` open. Every request (pages, form actions, data requests, endpoints) resolves the session into `event.locals.session` and passes `accessFor()` (`src/lib/server/auth/guard.ts`). Only an explicit allowlist is public: `/login`, `/api/cron/*` (own secret), `/favicon.svg`, `/robots.txt`, `/_app/immutable/*`, `/_app/version.json`, `/_app/env.js` (not all of `/_app/`: `/_app/remote/*` would be server code). Anything else without a session: pages get 303 to `/login?next=<path>`, `/api/*` gets 401 JSON (503 JSON when login is not configured). `next` must be a same-origin relative path (never `//evil.com`, absolute URLs or backslash tricks), else `/`. `(app)/+layout.server.ts` only exposes session info; it is not a security boundary.
+- **Sessions are server-side** (`auth_sessions(id, created_at, expires_at, last_seen_at)`, migration 0005). The cookie `se_session` holds 32 random bytes (base64url); the table stores only their SHA-256, so a copy of the database cannot log anyone in. 30 days, sliding: on use, `last_seen_at` and the expiry move forward at most once an hour. Logout (a POST action) deletes the row and the cookie; an expired row is deleted when presented.
+- **Cookies:** `httpOnly`, `sameSite=lax`, `path=/`; `secure` from `COOKIE_SECURE` (default true). `false` is allowed for any `ORIGIN`, because the app is served over plain HTTP on an IP (Part 0, Decisions). With `false` and a non-local origin, the server logs a startup warning and the login page shows a small, non-blocking notice: "Kết nối không mã hóa". The theme preference (`system`/`light`/`dark`) is a cookie too, so the server renders `data-theme` on `<html>` and the first paint is right.
+- **`ORIGIN`** must equal the URL in the browser exactly (now `http://103.82.195.48:3000`; `http://localhost:3000` through an SSH tunnel); otherwise SvelteKit's CSRF check rejects the login form with 403. **It is read at build time** (`vite.config.ts` → `paths.origin`): adapter-node 6 (SvelteKit 3) has no runtime `ORIGIN` variable and, without `paths.origin`, assumes `https://<host>`, which over plain HTTP rejects every form POST. Build with `ORIGIN` set and rebuild after changing it.
+- **Login rate limit:** at most 5 failed attempts per IP per 10 minutes, then 429 with a Vietnamese message (in memory: one process). Every failure waits a constant 300 ms. Without TLS these matter more, and they stay. If a proxy or tunnel is put in front later, adapter-node must read the client address from `X-Forwarded-For` (`ADDRESS_HEADER`, `XFF_DEPTH`), or all requests share one IP.
 - **Rate-limit** routes that call the LLM. One user does not need more than 60 calls per hour.
 - **Set a spending limit at the LLM provider** and enable usage alerts. This is the last line of defence against a runaway loop.
 - The cron endpoint compares its secret with a timing-safe comparison, not `===`.
@@ -416,27 +424,27 @@ The app is on the public internet, so:
 ### 7. Deployment
 
 ```
-Internet → Caddy (443, automatic TLS) → Node (127.0.0.1:3000, systemd)
-                                          ↓
-                                    data/app.db
-                                          ↓
-                                    Litestream → R2 / B2
+Phone browser → http://103.82.195.48:3000 → Node (0.0.0.0:3000, systemd)
+                                              ↓
+                                        data/app.db
+                                              ↓
+                                        Litestream → R2 / B2
 ```
 
-- **VPS:** Vultr or DigitalOcean, Singapore region, ~US$5–6/month, 1 vCPU / 1 GB RAM. Ample for one user. (Hetzner is cheaper but has no Asian region; latency from Vietnam would be ~250 ms.)
-- **Caddy:** a few lines of config; obtains and renews Let's Encrypt certificates itself.
+- **VPS:** a small VPS (1 vCPU / 1 GB RAM is ample for one user), close to Vietnam for latency.
+- **No reverse proxy, no TLS for now** (Part 0, Decisions): adapter-node listens on `HOST=0.0.0.0`, `PORT=3000`; the firewall allows only SSH and 3000. HTTPS can be added later in front (Tailscale or a Cloudflare Tunnel) without code changes.
 - **systemd:** `Restart=always`, environment loaded from a `.env` file with mode 600.
 - **Litestream:** continuous replication of the SQLite file to object storage.
 - **Cron:** `crontab` calls the prefetch endpoint at 03:00 Vietnam time.
-- **Deploy:** `git pull && npm ci && npm run build && systemctl restart silentenglish`, wrapped in `deploy/deploy.sh`.
+- **Deploy:** `git pull && npm ci && npm run build && systemctl restart silentenglish`, wrapped in `deploy/deploy.sh`. The build must see `ORIGIN` (Part II §6), so the script loads `/etc/silentenglish/.env` before `npm run build`.
 
-Total cost: VPS ~US$5–6/month, domain ~US$10/year, LLM usage a few cents per month.
+Total cost: the VPS, plus LLM usage of a few cents per month.
 
-### 8. PWA and network resilience
+### 8. Network use (no PWA)
 
-- `manifest.json` and icons so the app installs to the home screen.
-- A service worker caches the app shell (HTML, CSS, JS).
-- **More important than caching:** when a session starts, the server returns **the entire session's content** in one response. The session runs fully client-side. Results are batched and submitted once at the end; if submission fails, they are kept in `localStorage` and retried on the next load.
+- **PWA is out of scope** (Part 0, Decisions): no manifest, no service worker, no offline page. A plain `static/favicon.svg` is the only icon.
+- **One request in, one request out:** when a session starts, the server returns **the entire session's content** in one response; the session runs client-side; results are submitted once at the end. There is no `localStorage` retry: the app assumes it is online.
+- Fonts are self-hosted (`@fontsource`, latin + vietnamese subsets, woff2 only): no third-party requests.
 
 ### 9. Testing
 
@@ -662,39 +670,35 @@ This phase produces asset files with a one-off script in `tool/`. It adds no app
 
 #### Phase 6 — App shell and authentication
 
-> Build authentication and the app shell before any feature screens.
+> Build authentication, the navigable shell, the theme and the shared components (design in Part II §6; plan in `plans/phase-06.md`). No learning features; the one exception: Home shows real card counts from the SRS `counts()`. **No PWA** (Part 0, Decisions).
 >
-> **Auth:** a single-user password gate. Hash with `@node-rs/argon2`, store the hash in `APP_PASSWORD_HASH`. `POST /login` verifies and sets an `httpOnly`, `secure`, `sameSite=lax` session cookie valid 30 days. Put the guard in `src/routes/(app)/+layout.server.ts` so every route in the group is protected by one chokepoint — do not guard routes individually. Add a small CLI script that prints the hash for a given password. Add a Playwright test asserting that an unauthenticated request to each `(app)` route redirects to `/login`.
+> - **Auth:** single user, argon2id hash in `APP_PASSWORD_HASH` (`npm run auth:hash`, hidden prompt twice), server-side sessions (`auth_sessions`, 30 days sliding), cookie rules from `COOKIE_SECURE` + `ORIGIN` (HTTP allowed, with a warning and a login notice for a non-local origin). The chokepoint is `handle` in `src/hooks.server.ts` with an explicit public allowlist; pages redirect to `/login?next=…` (validated), `/api/*` answers 401. Login: argon2 verify, 5 failures per IP per 10 minutes then 429, a constant 300 ms delay on failure; unconfigured means nothing is reachable. Logout is a POST action.
+> - **Shell:** `(app)` group: Home (`Hôm nay`), Stats (`Tiến độ`), Settings (`Cài đặt`) with a bottom tab bar; `/session` full screen with an exit. Every string in `messages/vi.ts`.
+> - **Design:** mobile-first (360–430 px), primary actions in the thumb zone, 48 px targets, safe areas; light/dark following the system with a cookie override; self-hosted Be Vietnam Pro (UI) and Literata (English reading); body 17 px, reading 19 px; calm palette tokens meeting WCAG AA in both themes; states readable without colour; reduced motion respected.
+> - **Components** (`src/lib/components/`): Button, Card, ProgressBar, OptionButton, TextAnswer, EmptyState, ErrorState, LoadingState, TabBar; a dev-only gallery at `/dev/components` (404 in production).
 >
-> **Shell:** a layout with bottom navigation and four routes — Home (`Hôm nay`), Stats (`Tiến độ`), Settings (`Cài đặt`), plus a full-screen route for an active session. Each renders a placeholder with a real Vietnamese title from `messages/vi.ts` and an empty state.
->
-> **Theme:** define colors, spacing and typography in the Tailwind config. Pick a font that renders Vietnamese diacritics correctly at small sizes — verify with `ệ`, `ữ`, `ặ`, `ỗ`. Build shared components: primary/secondary button, card, progress bar, empty state, error state, loading state.
->
-> **PWA:** `manifest.json`, icons, and a service worker caching the app shell.
->
-> No feature logic in this phase.
+> Tests: Playwright (redirects, 401s, cron secret, wrong password, 429, `next`, logout, expiry, the HTTP notice, unconfigured server) and Vitest (sessions, `next`, rate limiter, cookie rule). `npm run screenshots` captures the screens in both themes.
 
-**Result:** an app with login, navigation and theme, installable to the home screen.
-**Check:** try reaching a route without logging in; inspect Vietnamese diacritics at the smallest text size; install the PWA on a phone.
+**Result:** an app with login, navigation and theme, in the phone's browser.
+**Check:** `npm run verify` and `npm run test:e2e`; look at `npm run screenshots`; log in from the phone's browser.
 
 ---
 
 #### Phase 7 — Deploy to the VPS
 
-Deploy early, while the app is nearly empty. Infrastructure problems are much cheaper to find now than after four feature phases.
+Deploy early, while the app is nearly empty. Infrastructure problems are much cheaper to find now than after four feature phases. No reverse proxy and no TLS (Part 0, Decisions): the app is served by Node on `http://<server IP>:3000`.
 
-> Produce the deployment setup in `deploy/` and a runbook in `plans/phase-07.md`. I am deploying to a fresh Ubuntu VPS in Singapore.
+> Produce the deployment setup in `deploy/` and a runbook in `plans/phase-07.md`.
 >
-> 1. `deploy/Caddyfile` — reverse proxy to `127.0.0.1:3000`, automatic TLS for my domain, security headers (HSTS, X-Content-Type-Options, Referrer-Policy).
-> 2. `deploy/silentenglish.service` — a systemd unit running `node build/index.js`, `Restart=always`, `EnvironmentFile=/etc/silentenglish/.env`, running as a non-root user.
-> 3. `deploy/litestream.yml` — continuous replication of `data/app.db` to S3-compatible storage, with the bucket and credentials read from env.
-> 4. `deploy/deploy.sh` — `git pull && npm ci && npm run build && sudo systemctl restart silentenglish`, failing loudly on any step.
-> 5. `deploy/crontab` — call the prefetch endpoint at 03:00 Asia/Ho_Chi_Minh with the `CRON_SECRET` (POST, `Content-Type: application/json`, body `{}`).
-> 6. A runbook in `plans/phase-07.md` covering, in order: create the non-root user, SSH key-only access with password login disabled, ufw allowing only 22/80/443, fail2ban, install Node and Caddy, create `/etc/silentenglish/.env` with mode 600, first deploy, verify TLS, verify Litestream is replicating, and **restore the database from backup into a scratch directory to prove the backup actually works**.
+> 1. `deploy/silentenglish.service` — a systemd unit running `node build/index.js` with `HOST=0.0.0.0` and `PORT=3000`, `Restart=always`, `EnvironmentFile=/etc/silentenglish/.env`, running as a non-root user.
+> 2. `deploy/litestream.yml` — continuous replication of `data/app.db` to S3-compatible storage, with the bucket and credentials read from env.
+> 3. `deploy/deploy.sh` — `git pull && npm ci && npm run build && sudo systemctl restart silentenglish`, failing loudly on any step. It must export `ORIGIN` from `/etc/silentenglish/.env` before `npm run build`: SvelteKit 3 fixes the origin at build time (Part II §6).
+> 4. `deploy/crontab` — call the prefetch endpoint at 03:00 Asia/Ho_Chi_Minh with the `CRON_SECRET` (POST, `Content-Type: application/json`, body `{}`).
+> 5. A runbook in `plans/phase-07.md` covering, in order: create the non-root user, SSH key-only access with password login disabled, ufw allowing only SSH and 3000, fail2ban, install Node, create `/etc/silentenglish/.env` with mode 600 (`ORIGIN`, `COOKIE_SECURE=false`, `HOST`, `PORT` as in `.env.example`), first deploy, verify Litestream is replicating, and **restore the database from backup into a scratch directory to prove the backup actually works**.
 >
 > Do not put any secret in the repository. The `.env` file is created by hand on the server.
 
-**Result:** the app running on your domain with HTTPS and backups.
+**Result:** the app running at `http://<server IP>:3000` with backups.
 **Check:** open it on a phone over 4G and log in; `systemctl status` is green; **restore the database from backup once and open it** — a backup that has never been restored is not a backup.
 
 ---
@@ -728,7 +732,7 @@ Deploy early, while the app is nearly empty. Infrastructure problems are much ch
 >
 > **All content comes from `generated_cache`.** If the cache is short for a needed kind, degrade to Nhanh and surface a prompt to run prefetch — never block a session on a live LLM call.
 >
-> **Network resilience:** `GET /api/session/start` returns the entire session payload in one response. The session runs client-side. Results are batched and submitted once at the end via `POST /api/session/finish`; if that request fails, persist the payload to `localStorage` and retry on next load.
+> **One request in, one request out:** `GET /api/session/start` returns the entire session payload in one response. The session runs client-side. Results are batched and submitted once at the end via `POST /api/session/finish`. The app is always online (Part 0, Decisions): no `localStorage` retry.
 >
 > Writing anchor: persist with `status='queued'` on submit, grade server-side, show feedback inline if it returns in time, otherwise at the start of the next session.
 >
@@ -741,7 +745,7 @@ Deploy early, while the app is nearly empty. Infrastructure problems are much ch
 > Add a Playwright test completing a full session end to end.
 
 **Result:** a daily session that works end to end.
-**Check:** run all three shapes; switch to airplane mode mid-session and confirm you can finish, with results submitted once the network returns; confirm error mining creates tagged cards.
+**Check:** run all three shapes; confirm a session makes exactly one start and one finish request; confirm error mining creates tagged cards.
 
 ---
 
@@ -785,12 +789,12 @@ Deploy early, while the app is nearly empty. Infrastructure problems are much ch
 | 3 | Intervals grow sensibly in a manual walkthrough |
 | 5 | In `eval:cloze`, a human finds at most 1 bad item among 30 validated items |
 | 7 | Database restored from backup successfully once |
-| 9 | A full session completes with the network cut mid-way |
+| 9 | A full session completes, with one start request and one finish request |
 
 ### Three most likely failures
 
 1. **Committing an API key.** Mitigated by the Phase 0 hook, but still the biggest risk.
-2. **A missing or bypassed login gate.** A public app anyone can use spends the owner's API credits. Hence one chokepoint in the layout, plus a Playwright test proving it.
+2. **A missing or bypassed login gate.** A public app anyone can use spends the owner's API credits. Hence one chokepoint in `src/hooks.server.ts`, plus Playwright tests proving it.
 3. **Generated content that passes validation but teaches poorly.** That is why Phase 5 requires a human to read items, not just a pass rate.
 
 ### Optional early playable
@@ -801,7 +805,8 @@ After Phase 3, hard-code 50 Tatoeba cloze items and a bare review page. Throwawa
 
 ## Part IV — Caveats
 
-- **No true offline mode.** Compensated by loading the whole session client-side. Enough for a train, not for a flight. If needed later, wrap the app with Capacitor to get a native shell reusing all the code.
+- **No offline mode, no PWA** (Part 0, Decisions). The app is used in a browser and assumes a connection. If that changes, a PWA or a Capacitor shell can reuse all the code.
+- **Plain HTTP on an IP address.** The password and the session cookie cross the network unencrypted, by the owner's decision; the login page says so. The rate limit, the constant failure delay and server-side sessions limit the damage. HTTPS can be added in front later (Tailscale or a Cloudflare Tunnel) without code changes: set `ORIGIN=https://…` and `COOKIE_SECURE=true`.
 - **The app is on the public internet.** Authentication, rate limiting and a provider-side spending cap are three separate layers, not one.
 - **LLM output is a draft, not an authority.** Items can be ambiguous and grading can drift between runs. The pipeline catches structural defects, not weak teaching. Keep the eval set and re-read items now and then.
 - **Model prices and names change constantly.** This document deliberately quotes no prices. Check current rates before choosing a model.

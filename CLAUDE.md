@@ -4,8 +4,9 @@
 
 SilentEnglish is a personal, single-user, non-commercial web app that teaches English reading,
 writing, vocabulary and grammar to a Vietnamese speaker. There is no audio of any kind. Sessions
-last 5–10 minutes and are used on a phone as an installed PWA. The entire UI is in Vietnamese. It
-runs on a small VPS behind Caddy, with SQLite as the only datastore.
+last 5–10 minutes and are used in a phone's browser, always online (no PWA, no offline mode). The
+entire UI is in Vietnamese. It runs on a small VPS, served by Node over plain HTTP on the server's IP
+for now (HTTPS can be added later via deployment config), with SQLite as the only datastore.
 
 **Source of truth: `docs/architecture.md`.** Part I is the learning design, Part II the technical
 architecture, Part III the phased build plan. `plans/roadmap.md` tracks phase status.
@@ -39,10 +40,12 @@ src/
       generation/        content import; generators + validation (cloze/, drills/, reading/), prefetch
       grading/           live writing and translation grading (no cache)
       cron/              cron endpoint logic (secret check, single-run lock)
+      auth/              sessions, cookie rules, login limiter, the public-path allowlist
       content/           generated JSON assets (NGSL, Tatoeba pairs, pseudo-words); built by
                          `npm run content:prepare`, never edited by hand. Exception:
                          blocklist.txt (hand-maintained; used by `content:import`)
-    components/          shared Svelte components
+    components/          shared Svelte components (gallery: /dev/components, dev only)
+    styles/              colour tokens (WCAG-checked by a test) and self-hosted font faces
     messages/vi.ts       every user-facing string (export `t`), grouped by screen
   routes/
     (app)/               login-protected route group
@@ -51,11 +54,13 @@ src/
 scripts/                 repo tooling (check-strings.mjs)
 tool/                    data preparation scripts (`lib/` pure + tested), `raw/` inputs
 data/                    SQLite database files (never committed)
-deploy/                  Caddyfile, systemd unit, Litestream config
+deploy/                  systemd unit, Litestream config, deploy script, crontab
 .githooks/pre-commit     blocks .env / *.db files and runs gitleaks
 ```
 
-Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e tests as `*.e2e.ts`.
+Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e tests as `*.e2e.ts`
+(Playwright starts three preview servers: main, no password hash, and an isolated rate-limit one).
+SvelteKit 3 renamed `$app/environment` to `$app/env`.
 
 ## Commands
 
@@ -77,6 +82,8 @@ Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e test
 | `npm run eval:grading` | Grade `test/eval/grading-fixtures.json` twice each (live calls; `--dry-run` canned) |
 | `npm run prefetch -- [--max-calls N] [--dry-run]` | Top up the stock (cloze, drills, passages), cheapest first; same as the cron endpoint |
 | `npm run llm:usage -- --days 7` | LLM calls and tokens per day × purpose × model |
+| `npm run auth:hash` | Prompt for the login password twice (hidden) and print `APP_PASSWORD_HASH` |
+| `npm run screenshots` | Login, Home, Stats, Settings, `/dev/components` at 390×844, light + dark, into `tmp/screens/` |
 | `npm run db:generate` | Generate a SQL migration from `src/lib/server/db/schema.ts` (commit it) |
 | `npm run db:migrate` | Apply pending migrations to `DATABASE_PATH` (default `data/app.db`) |
 | `npm run db:studio` | Browse the database with Drizzle Studio |
@@ -101,6 +108,8 @@ Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e test
    `plans/phase-XX.md`; stay within its scope; finish with `npm run verify` passing; then commit
    (one commit per phase) and tick the phase in `plans/roadmap.md`.
 7. **Language:** code, comments and commit messages are in English. UI strings are in Vietnamese.
+8. **Auth is enforced in `src/hooks.server.ts`; never rely on a layout for protection.** Every new
+   public path must be added deliberately to the allowlist in `src/lib/server/auth/guard.ts`.
 
 ## Database
 
@@ -124,4 +133,6 @@ Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e test
 ## Environment
 
 Variables are listed in `.env.example`. Copy it to `.env` locally; on the server they live in
-`/etc/silentenglish/.env` (mode 600). Never create or edit a committed env file.
+`/etc/silentenglish/.env` (mode 600). Never create or edit a committed env file. `ORIGIN` is read
+at build time (`vite.config.ts` `paths.origin`; adapter-node 6 has no runtime `ORIGIN`): build with
+it set, or plain-HTTP logins fail CSRF with 403.

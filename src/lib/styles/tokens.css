@@ -1,0 +1,71 @@
+/*
+ * Colour tokens. Calm and low-glare: warm paper and deep jade in light, soft charcoal and
+ * sea-green in dark. Every text/background pair meets WCAG AA (4.5:1) and control borders meet
+ * 3:1 in both themes: src/lib/styles/tokens.spec.ts checks it. Keep the two dark blocks identical.
+ */
+
+/* light (the default) */
+:root,
+[data-theme='light'] {
+	color-scheme: light;
+	--bg: #f5f2ec;
+	--surface: #fffdf9;
+	--surface-2: #ece7de;
+	--border: #d2cabc;
+	--control: #7e878a;
+	--text: #1e2528;
+	--muted: #566064;
+	--primary: #1d6b62;
+	--primary-contrast: #ffffff;
+	--primary-soft: #dcebe7;
+	--correct: #22673f;
+	--correct-soft: #ddefe3;
+	--incorrect: #a2271c;
+	--incorrect-soft: #f7e0dc;
+	--warning: #7a5300;
+	--warning-soft: #f6e9c9;
+}
+
+/* dark (chosen) */
+[data-theme='dark'] {
+	color-scheme: dark;
+	--bg: #111618;
+	--surface: #1a2124;
+	--surface-2: #232b2f;
+	--border: #3a474d;
+	--control: #7a888e;
+	--text: #e7e3da;
+	--muted: #a6aeb0;
+	--primary: #74c7b8;
+	--primary-contrast: #0d1b19;
+	--primary-soft: #1e3532;
+	--correct: #86d3a2;
+	--correct-soft: #1c3326;
+	--incorrect: #f4a098;
+	--incorrect-soft: #3a2120;
+	--warning: #e9b95c;
+	--warning-soft: #362c17;
+}
+
+/* dark (following the system) */
+@media (prefers-color-scheme: dark) {
+	[data-theme='system'] {
+		color-scheme: dark;
+		--bg: #111618;
+		--surface: #1a2124;
+		--surface-2: #232b2f;
+		--border: #3a474d;
+		--control: #7a888e;
+		--text: #e7e3da;
+		--muted: #a6aeb0;
+		--primary: #74c7b8;
+		--primary-contrast: #0d1b19;
+		--primary-soft: #1e3532;
+		--correct: #86d3a2;
+		--correct-soft: #1c3326;
+		--incorrect: #f4a098;
+		--incorrect-soft: #3a2120;
+		--warning: #e9b95c;
+		--warning-soft: #362c17;
+	}
+}

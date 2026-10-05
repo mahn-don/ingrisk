@@ -431,6 +431,22 @@ export const generatedCache = sqliteTable(
 );
 
 /**
+ * Login sessions (single user). The cookie holds a random 32-byte id; only its SHA-256 hash is
+ * stored here, so a copy of the database cannot be used to log in. Expiry slides forward on use.
+ */
+export const authSessions = sqliteTable(
+	'auth_sessions',
+	{
+		/** sha256(cookie value), hex. */
+		id: text('id').primaryKey(),
+		createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+		expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+		lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }).notNull()
+	},
+	(t) => [index('auth_sessions_expires_at').on(t.expiresAt)]
+);
+
+/**
  * One row per running job (e.g. 'prefetch'): a run takes the row, finishes by deleting it.
  * A row older than the job's stale limit counts as free (a crashed run never blocks forever).
  */

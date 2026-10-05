@@ -12,7 +12,12 @@ export default defineConfig({
 				runes: ({ filename }) =>
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
-			adapter: adapter()
+			adapter: adapter(),
+			// adapter-node 6 has no runtime ORIGIN variable: the origin is fixed at BUILD time here.
+			// Without it, adapter-node assumes https://<host>, and over plain HTTP SvelteKit's CSRF
+			// check rejects every form POST (the login) with 403. Build with ORIGIN set to the exact
+			// address-bar origin, e.g. ORIGIN=http://103.82.195.48:3000 npm run build.
+			paths: { origin: process.env.ORIGIN || undefined }
 		})
 	],
 	test: {
