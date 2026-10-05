@@ -3,5 +3,11 @@
 	"compilerOptions": {
 		"strict": true
 	},
-	"include": ["src", "tool", "vite.config.ts"]
+	"include": [
+		"src",
+		"tool",
+		"test",
+		"vite.config.ts",
+		"playwright.config.ts"
+	]
 }

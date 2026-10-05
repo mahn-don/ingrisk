@@ -10,8 +10,8 @@ commit per phase, `npm run verify` green before committing.
 - [x] **Phase 4 — LLM provider layer:** an `LlmClient` with OpenAI-compatible and Anthropic adapters, retry/fallback, and divergence + key-leak tests.
 - [x] **Phase 5a — Content import and the cloze pipeline:** idempotent content import with a blocklist, and a validated cloze pool (deterministic candidates, LLM distractors, rules, blind critic) with cost guards and a human eval sheet.
 - [x] **Phase 5b — Passages, error drills, grading and prefetch:** injected and LLM-written error drills and graded passages behind blind critics, live writing/translation grading, a static writing-prompt bank, and the locked, secret-guarded prefetch job.
-- [ ] **Phase 6 — App shell and authentication:** single-password login gate, app shell with navigation and theme, installable PWA.
-- [ ] **Phase 7 — Deploy to the VPS:** Caddy, systemd, Litestream, deploy script, cron and a runbook, with a proven backup restore.
+- [x] **Phase 6 — App shell and authentication:** hooks-level auth with server-side sessions and a login limiter, the tabbed shell with real card counts, a WCAG-checked light/dark theme with self-hosted fonts and shared components. Browser-only over HTTP: no PWA (amendment).
+- [ ] **Phase 7 — Deploy to the VPS:** systemd (Node on `0.0.0.0:3000`, plain HTTP), Litestream backup, cron, the deploy script and a runbook, with a proven backup restore.
 - [ ] **Phase 8 — Placement test:** the retakeable three-part placement flow with Elo-style estimation reported on CEFR/VSTEP/IELTS/TOEIC.
 - [ ] **Phase 9 — Session loop:** the time-budgeted daily session (Nhanh/Đọc/Viết) running client-side from cached content, with error mining.
 - [ ] **Phase 10 — Settings, stats, motivation:** provider management, settings, stats, and the gentle streak/weekly-goal motivation layer.

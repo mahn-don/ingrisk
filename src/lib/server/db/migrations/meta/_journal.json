@@ -36,6 +36,13 @@
       "when": 1791184808071,
       "tag": "0004_job_locks",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791188382686,
+      "tag": "0005_auth_sessions",
+      "breakpoints": true
     }
   ]
 }

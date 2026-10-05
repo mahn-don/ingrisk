@@ -50,6 +50,7 @@ describe('migrations', () => {
 		const db = createTestDb();
 		expect(tableNames(db)).toEqual([
 			'__drizzle_migrations',
+			'auth_sessions',
 			'cards',
 			'cloze_items',
 			'collocations',

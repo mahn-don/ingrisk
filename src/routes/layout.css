@@ -1,1 +1,66 @@
 @import 'tailwindcss';
+@import '../lib/styles/fonts.css';
+@import '../lib/styles/tokens.css';
+
+/* Semantic colours as Tailwind utilities (bg-surface, text-muted, border-control, ...). */
+@theme inline {
+	--color-bg: var(--bg);
+	--color-surface: var(--surface);
+	--color-surface-2: var(--surface-2);
+	--color-border: var(--border);
+	--color-control: var(--control);
+	--color-text: var(--text);
+	--color-muted: var(--muted);
+	--color-primary: var(--primary);
+	--color-primary-contrast: var(--primary-contrast);
+	--color-primary-soft: var(--primary-soft);
+	--color-correct: var(--correct);
+	--color-correct-soft: var(--correct-soft);
+	--color-incorrect: var(--incorrect);
+	--color-incorrect-soft: var(--incorrect-soft);
+	--color-warning: var(--warning);
+	--color-warning-soft: var(--warning-soft);
+}
+
+@theme {
+	--font-sans: 'Be Vietnam Pro', ui-sans-serif, system-ui, sans-serif;
+	--font-reading: 'Literata', Georgia, 'Times New Roman', serif;
+	/* Body 17 px; reading passages 19 px; the smallest UI text is 13 px. */
+	--text-xs: 0.8125rem;
+	--text-xs--line-height: 1.4;
+	--text-base: 1.0625rem;
+	--text-base--line-height: 1.55;
+	--text-reading: 1.1875rem;
+	--text-reading--line-height: 1.65;
+}
+
+html {
+	background-color: var(--bg);
+	-webkit-text-size-adjust: 100%;
+	-webkit-tap-highlight-color: transparent;
+}
+
+body {
+	background-color: var(--bg);
+	color: var(--text);
+	font-family: var(--font-sans);
+	font-size: var(--text-base);
+	line-height: var(--text-base--line-height);
+}
+
+:focus-visible {
+	outline: 3px solid var(--primary);
+	outline-offset: 2px;
+}
+
+/* Minimal motion, and none when the user asks for less. */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	::before,
+	::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
+}
