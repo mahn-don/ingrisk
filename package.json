@@ -33,6 +33,7 @@
 		"llm:usage": "node --env-file-if-exists=.env tool/llm-usage.ts",
 		"auth:hash": "node tool/auth-hash.ts",
 		"screenshots": "node tool/screenshots.ts",
+		"test:seed": "node tool/seed-test-db.ts",
 		"verify": "npm run check && npm run lint:strings && npm run test && npm run build"
 	},
 	"dependencies": {

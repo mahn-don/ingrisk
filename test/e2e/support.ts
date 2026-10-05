@@ -11,7 +11,8 @@ export const E2E_DIR = 'tmp/e2e';
 export const SERVERS = {
 	main: { port: 4173, db: `${E2E_DIR}/main.db` },
 	unconfigured: { port: 4174, db: `${E2E_DIR}/unconfigured.db` },
-	rateLimit: { port: 4175, db: `${E2E_DIR}/rate-limit.db` }
+	rateLimit: { port: 4175, db: `${E2E_DIR}/rate-limit.db` },
+	placement: { port: 4176, db: `${E2E_DIR}/placement.db` }
 } as const;
 
 export async function login(page: Page, next = '/'): Promise<void> {

@@ -3,8 +3,14 @@ import { clearSessionCookie, setThemeCookie } from '#lib/server/auth/cookies.js'
 import { getAuthConfig } from '#lib/server/auth/index.js';
 import { SESSION_COOKIE, deleteSession } from '#lib/server/auth/sessions.js';
 import { getDb } from '#lib/server/db/client.js';
+import { placementRepo } from '#lib/server/db/repositories/placement.js';
 import { THEMES, type Theme } from '#lib/theme.js';
-import type { Actions } from './$types';
+import type { Actions, PageServerLoad } from './$types';
+
+export const load: PageServerLoad = () => {
+	const latest = placementRepo(getDb()).latestResult();
+	return { placement: latest === undefined ? null : { id: latest.id, cefr: latest.cefr, takenAt: latest.takenAt.getTime() } };
+};
 
 export const actions: Actions = {
 	theme: async ({ request, cookies }) => {

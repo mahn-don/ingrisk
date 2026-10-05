@@ -32,6 +32,8 @@ const holder = randomUUID();
 if (!locks.acquire(PREFETCH_LOCK, holder, new Date(), PREFETCH_STALE_LOCK_MS)) fail('A prefetch run is already in progress.');
 try {
 	const summary = await prefetch({ maxCalls }, { llm: w.llm, context: w.context, dailyCap });
+	const { graded, failed, remaining } = summary.writing;
+	console.log(`queued writing: ${graded} graded, ${failed} failed, ${remaining} still queued`);
 	console.log('shortfall (cheapest first):');
 	if (summary.shortfall.length === 0) console.log('  none: every stock is full');
 	for (const s of summary.shortfall) console.log(`  ${s.kind}${s.topic ? ` ${s.topic}` : ''} band ${s.band}: ${s.have}/${s.target}`);
