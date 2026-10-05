@@ -1,5 +1,5 @@
 import { and, asc, count, eq, inArray, isNull } from 'drizzle-orm';
-import type { Db } from '../client.ts';
+import type { DbOrTx } from '../client.ts';
 import { CARD_KINDS, generatedCache } from '../schema.ts';
 
 export type CacheItem = typeof generatedCache.$inferSelect;
@@ -17,7 +17,7 @@ export interface StockEntry {
 }
 
 /** Pre-generated exercise items (filled by prefetch, consumed by sessions). */
-export function cacheRepo(db: Db) {
+export function cacheRepo(db: DbOrTx) {
 	return {
 		/** Store a validated item. Returns undefined if an item with the same content_hash exists. */
 		insertValidated(item: NewCacheItem): CacheItem | undefined {

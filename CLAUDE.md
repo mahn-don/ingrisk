@@ -34,7 +34,7 @@ src/
       db/                Drizzle schema, migrations/, repositories/ (intent-level functions; callers
                          never build queries), client.ts (connection, pragmas, migrate)
       llm/               provider adapters, prompts, Zod schemas
-      srs/               ts-fsrs wrapper
+      srs/               ts-fsrs wrapper: scheduler, review, auto-rating, queue (never reads the clock)
       generation/        exercise generation + validation pipeline
       content/           generated JSON assets (NGSL, Tatoeba pairs, pseudo-words); built by
                          `npm run content:prepare`, never edited by hand
@@ -69,6 +69,7 @@ Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e test
 | `npm run db:generate` | Generate a SQL migration from `src/lib/server/db/schema.ts` (commit it) |
 | `npm run db:migrate` | Apply pending migrations to `DATABASE_PATH` (default `data/app.db`) |
 | `npm run db:studio` | Browse the database with Drizzle Studio |
+| `npm run srs:walkthrough` | Print one card's FSRS intervals through a fixed rating sequence |
 | `npm run verify` | `check` → `lint:strings` → `test` → `build`, stops at first failure |
 
 ## Hard rules
@@ -93,6 +94,11 @@ Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e test
 - Change the schema in `schema.ts`, then `npm run db:generate` and commit the new migration.
   Never edit an applied migration. Migrations run automatically at server start.
 - Repositories take the db as a parameter; tests use `createTestDb()` (in-memory, migrated).
+
+## Spaced repetition
+
+- `src/lib/server/srs/` never reads the clock (no `Date.now()`, no `new Date()` without arguments):
+  every function takes `now`. A test enforces this.
 
 ## Environment
 

@@ -1,5 +1,5 @@
 // Intent-level data access. Callers use these functions, never raw queries.
-import { getDb, type Db } from '../client.ts';
+import { getDb, type DbOrTx } from '../client.ts';
 import { cacheRepo } from './cache.ts';
 import { cardsRepo } from './cards.ts';
 import { grammarTopicsRepo } from './grammar-topics.ts';
@@ -11,7 +11,7 @@ import { settingsRepo } from './settings.ts';
 import { writingRepo } from './writing.ts';
 
 /** All repositories bound to one database (tests pass an in-memory one). */
-export function createRepositories(db: Db) {
+export function createRepositories(db: DbOrTx) {
 	return {
 		settings: settingsRepo(db),
 		profile: profileRepo(db),

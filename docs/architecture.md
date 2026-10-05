@@ -49,6 +49,19 @@ Defaults: desired retention 0.9 (user-adjustable 0.70–0.97), learning steps 1m
 
 **Version trap:** much material online still describes FSRS-4.5/5, which has 19 parameters and a *fixed* `DECAY = −0.5`, `FACTOR = 19/81`. FSRS-6 has 21 parameters with a trainable decay `−w[20]`. Trust the library's release notes over blog posts.
 
+**Learning day:** a day for spaced repetition starts at **04:00 Asia/Ho_Chi_Minh** (UTC+7, no daylight saving), not at midnight, so late-night study (after midnight, before 4 a.m.) counts toward the evening before. The daily new-card limit (`new_cards_per_day`, default 10) is counted per learning day: a card counts as introduced on the day of its first review.
+
+**Auto-rating:** sessions are short, so the app infers the FSRS rating from the answer instead of asking for it (the UI may still let the learner override):
+
+| Outcome | Rating |
+|---|---|
+| Wrong | Again |
+| Correct, but with a hint, or slower than 8 s (multiple choice) / 15 s (typing) | Hard |
+| Correct, typed, faster than 5 s, no hint | Easy |
+| Any other correct answer (including every correct multiple-choice answer) | Good |
+
+Multiple choice never yields Easy: recognising an answer is easier than recalling it.
+
 **Review-log discipline:** persist every review (card id, timestamp, rating, elapsed days, stability and difficulty before and after). Without this log the parameters can never be re-optimized on the user's own history.
 
 ### 3. Principles to encode
@@ -189,10 +202,11 @@ Implemented in `src/lib/server/db/schema.ts` (Drizzle), with migrations in `src/
 **Conventions:** timestamps are `integer` Unix milliseconds; JSON columns are `text`; booleans are `integer` 0/1; enumerations are `text` with a CHECK on the allowed values; every foreign key states its `ON DELETE`. Column names are snake_case (TypeScript properties are camelCase).
 
 ```sql
-settings(id = 1, desired_retention, weekly_goal_days, default_session_budget,
+settings(id = 1, desired_retention, weekly_goal_days, default_session_budget, new_cards_per_day,
          feedback_mode, active_provider_id → llm_providers ON DELETE SET NULL)
--- single row, CHECK (id = 1); seeded: 0.9, 5, 8, 'direct', NULL.
--- CHECKs: desired_retention 0.70–0.97, weekly_goal_days 1–7, default_session_budget 1–60.
+-- single row, CHECK (id = 1); seeded: 0.9, 5, 8, 10, 'direct', NULL.
+-- CHECKs: desired_retention 0.70–0.97, weekly_goal_days 1–7, default_session_budget 1–60,
+-- new_cards_per_day 0–50 (added by migration 0001).
 
 llm_providers(id, name UNIQUE, base_url, model, wire_format, env_key_name,
               enabled, is_fallback)
@@ -507,16 +521,19 @@ This phase produces asset files with a one-off script in `tool/`. It adds no app
 
 #### Phase 3 — Spaced-repetition engine
 
-> Implement `src/lib/server/srs/` as a thin wrapper over the `ts-fsrs` package. Do not reimplement the algorithm.
+> Implement `src/lib/server/srs/` as a thin, deterministic layer over the `ts-fsrs` package plus the queue policy around it. Do not reimplement the algorithm. **The engine never reads the clock:** every function takes `now`, so offline reviews can be applied later with the times the client recorded. Every write goes through the repositories and accepts a db or a transaction.
 >
-> Expose one function: `review(card, rating, now) → { updatedCard, reviewLog }`, mapping our `cards` rows to and from the ts-fsrs card type. Read `desired_retention` from settings. Persist a `review_logs` row on every review.
+> - `scheduler.ts`: `createScheduler(settings, { fuzz })` — `desired_retention`, maximum interval 36,500 days, fuzz on, learning steps 1m/10m, relearning step 10m, default FSRS-6 weights.
+> - `mapping.ts`: lossless `toFsrsCard`/`fromFsrsCard` and the same pair for review logs.
+> - `review.ts`: `review(dbOrTx, cardId, rating, reviewedAt, serverNow)` in a transaction — typed errors for a missing card, a review earlier than `last_review`, or one more than 5 minutes ahead of `serverNow`; saves the card and appends the log with `old_s`/`new_s`/`old_d`/`new_d`. `reviewBatch` applies a batch in chronological order, all or nothing.
+> - `rating.ts`: `ratingFromOutcome({ correct, mode, responseMs, hintUsed })` per the auto-rating table in Part I §2.
+> - `preview.ts`: `previewIntervals(card, now, scheduler)` → per rating `{ rating, due, interval: { value, unit } }`.
+> - `queue.ts`: `buildQueue(db, now, { reviewLimit, newLimit })` (due cards, most overdue first, then New cards up to the daily limit per learning day), `learningDayStart(now)`, and `counts(db, now)` → `{ due, newAvailableToday, learning }`. Add the `new_cards_per_day` setting (default 10, 0–50) in a migration.
 >
-> Write tests stepping a card through realistic rating sequences (Again/Good/Good/Easy, and a lapse after a long interval) and asserting that intervals grow monotonically for successful reviews and collapse on a lapse. Pin the ts-fsrs version in `package.json`.
->
-> Also expose `dueCards(limit)` ordered by `due`, and a function returning counts of due/new/learning cards for the home screen.
+> Test interval growth (Again/Good/Good/Easy, and a lapse after a long interval), the retention setting, persistence and batch rollback, timestamp checks, lossless mapping, the auto-rating table with its boundaries, learning-day boundaries, the new-card limit, and a clock guard that fails if `srs/` calls `Date.now()` or `new Date()` without arguments. Pin the ts-fsrs version in `package.json`. Add `tool/srs-walkthrough.ts`, printing one card's intervals for Good ×4, Again, Good ×2.
 
-**Result:** scheduler and tests.
-**Check:** run the tests; step one card through Again/Good/Good/Easy and confirm the intervals grow plausibly (roughly minutes → days → weeks).
+**Result:** scheduler, queue policy and tests.
+**Check:** run `node tool/srs-walkthrough.ts`; intervals should read roughly minutes → days → weeks, then collapse on the lapse.
 
 ---
 

@@ -1,11 +1,11 @@
 import { eq } from 'drizzle-orm';
-import type { Db } from '../client.ts';
+import type { DbOrTx } from '../client.ts';
 import { sessions } from '../schema.ts';
 
 export type SessionRow = typeof sessions.$inferSelect;
 export type FinishedSession = Omit<typeof sessions.$inferInsert, 'id'>;
 
-export function sessionsRepo(db: Db) {
+export function sessionsRepo(db: DbOrTx) {
 	return {
 		/**
 		 * Record a finished session. Idempotent on client_session_id: a retried submission returns

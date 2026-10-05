@@ -1,12 +1,12 @@
 import { eq } from 'drizzle-orm';
-import type { Db } from '../client.ts';
+import type { DbOrTx } from '../client.ts';
 import { settings } from '../schema.ts';
 
 export type Settings = typeof settings.$inferSelect;
 export type SettingsPatch = Partial<Omit<Settings, 'id'>>;
 
 /** The single settings row (id = 1, seeded by the initial migration). */
-export function settingsRepo(db: Db) {
+export function settingsRepo(db: DbOrTx) {
 	return {
 		get(): Settings {
 			const row = db.select().from(settings).where(eq(settings.id, 1)).get();

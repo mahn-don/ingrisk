@@ -103,6 +103,8 @@ export const settings = sqliteTable(
 		weeklyGoalDays: integer('weekly_goal_days').notNull().default(5),
 		defaultSessionBudget: integer('default_session_budget').notNull().default(8),
 		feedbackMode: text('feedback_mode', { enum: FEEDBACK_MODES }).notNull().default('direct'),
+		/** New cards introduced per learning day (see srs/queue.ts). */
+		newCardsPerDay: integer('new_cards_per_day').notNull().default(10),
 		activeProviderId: integer('active_provider_id').references(() => llmProviders.id, {
 			onDelete: 'set null'
 		})
@@ -112,7 +114,8 @@ export const settings = sqliteTable(
 		check('settings_desired_retention', sql`${t.desiredRetention} between 0.7 and 0.97`),
 		check('settings_weekly_goal_days', sql`${t.weeklyGoalDays} between 1 and 7`),
 		check('settings_default_session_budget', sql`${t.defaultSessionBudget} between 1 and 60`),
-		check('settings_feedback_mode', oneOf(t.feedbackMode, FEEDBACK_MODES))
+		check('settings_feedback_mode', oneOf(t.feedbackMode, FEEDBACK_MODES)),
+		check('settings_new_cards_per_day', sql`${t.newCardsPerDay} between 0 and 50`)
 	]
 );
 

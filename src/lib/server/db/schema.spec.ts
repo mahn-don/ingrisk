@@ -1,10 +1,10 @@
 import { eq } from 'drizzle-orm';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEmptyCard } from 'ts-fsrs';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDb, migrate, type Db } from './client.ts';
+import { createDb, migrate, migrationsFolder, type Db } from './client.ts';
 import {
 	cards,
 	collocations,
@@ -74,6 +74,7 @@ describe('migrations', () => {
 				weeklyGoalDays: 5,
 				defaultSessionBudget: 8,
 				feedbackMode: 'direct',
+				newCardsPerDay: 10,
 				activeProviderId: null
 			}
 		]);
@@ -92,6 +93,37 @@ describe('migrations', () => {
 		migrate(db);
 		migrate(db);
 		expect(snapshot()).toEqual(before);
+	});
+
+	it('upgrades an existing database without losing settings (0000 -> 0001)', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'silentenglish-mig-'));
+		try {
+			const full = migrationsFolder();
+			const partial = join(dir, 'migrations');
+			mkdirSync(join(partial, 'meta'), { recursive: true });
+			copyFileSync(join(full, '0000_init.sql'), join(partial, '0000_init.sql'));
+			const journal = JSON.parse(readFileSync(join(full, 'meta', '_journal.json'), 'utf8'));
+			journal.entries = journal.entries.slice(0, 1);
+			writeFileSync(join(partial, 'meta', '_journal.json'), JSON.stringify(journal));
+
+			const db = createDb(':memory:');
+			migrate(db, partial);
+			const provider = db
+				.insert(llmProviders)
+				.values({ name: 'p', baseUrl: 'https://x', model: 'm', wireFormat: 'openai', envKeyName: 'OPENAI_API_KEY' })
+				.returning()
+				.get();
+			db.$client.prepare('update settings set desired_retention = 0.85, active_provider_id = ?').run(provider.id);
+			migrate(db, full);
+			expect(db.select().from(settings).get()).toMatchObject({
+				desiredRetention: 0.85,
+				activeProviderId: provider.id,
+				newCardsPerDay: 10
+			});
+			expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it('opens file databases with WAL and the other pragmas', () => {

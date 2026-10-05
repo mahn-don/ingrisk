@@ -1,12 +1,12 @@
 import { and, asc, eq } from 'drizzle-orm';
-import type { Db } from '../client.ts';
+import type { DbOrTx } from '../client.ts';
 import { llmProviders, settings } from '../schema.ts';
 
 export type Provider = typeof llmProviders.$inferSelect;
 export type ProviderInput = Omit<typeof llmProviders.$inferInsert, 'id'>;
 
 /** LLM provider configuration. Rows name the env variable holding the key, never the key. */
-export function providersRepo(db: Db) {
+export function providersRepo(db: DbOrTx) {
 	return {
 		list(): Provider[] {
 			return db.select().from(llmProviders).orderBy(asc(llmProviders.id)).all();
