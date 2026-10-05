@@ -38,4 +38,6 @@ cp .env.example .env              # then fill in values; never commit .env
 | `npm run content:prepare` | Rebuild the content assets in `src/lib/server/content/` from `tool/raw/` |
 | `npm run content:tatoeba-pairs` | Re-join the Tatoeba exports (see `tool/raw/README.md`) |
 | `npm run db:migrate` | Create or migrate the SQLite database at `DATABASE_PATH` (default `data/app.db`) |
+| `npm run llm:provider:add -- --name ... --base-url ... --model ... --wire-format ... --env-key-name ...` | Configure an LLM provider (the key stays in `.env`) |
+| `npm run llm:smoke -- --provider <name>` | Check a provider with one real call (uses your key and a few tokens) |
 | `npm run verify` | `check`, `lint:strings`, `test` and `build`, stopping at the first failure |

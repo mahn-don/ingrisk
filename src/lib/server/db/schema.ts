@@ -16,8 +16,12 @@ import {
 // --- Enumerations ------------------------------------------------------------------------------
 
 export const CARD_KINDS = ['cloze', 'translate', 'grammar', 'reading', 'error'] as const;
+/** What a cloze gap tests (Phase 5a). */
+export const CLOZE_GAP_TYPES = ['lexical', 'article', 'preposition', 'verb_form'] as const;
 export const WRITING_STATUSES = ['queued', 'scored', 'failed'] as const;
 export const WIRE_FORMATS = ['openai', 'anthropic'] as const;
+/** How a provider is asked for structured output (see src/lib/server/llm/). */
+export const STRUCTURED_MODES = ['json_schema', 'tool', 'json_prompt'] as const;
 export const SESSION_SHAPES = ['quick', 'read', 'write'] as const;
 export const PLACEMENT_WRITING_STATUSES = ['none', 'queued', 'scored'] as const;
 /** Direct correction plus a short explanation (default, Part I §5), or indirect prompts. */
@@ -77,8 +81,12 @@ export const llmProviders = sqliteTable(
 		baseUrl: text('base_url').notNull(),
 		model: text('model').notNull(),
 		wireFormat: text('wire_format', { enum: WIRE_FORMATS }).notNull(),
-		/** Name of the environment variable holding the API key, e.g. OPENAI_API_KEY. Never the key. */
-		envKeyName: text('env_key_name').notNull(),
+		structuredMode: text('structured_mode', { enum: STRUCTURED_MODES }).notNull().default('json_schema'),
+		/**
+		 * Name of the environment variable holding the API key, e.g. OPENAI_API_KEY. Never the key.
+		 * NULL for providers that need no key (a local Ollama).
+		 */
+		envKeyName: text('env_key_name'),
 		enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
 		isFallback: integer('is_fallback', { mode: 'boolean' }).notNull().default(false)
 	},
@@ -86,10 +94,11 @@ export const llmProviders = sqliteTable(
 		uniqueIndex('llm_providers_name_unique').on(t.name),
 		uniqueIndex('llm_providers_one_fallback').on(t.isFallback).where(sql`${t.isFallback} = 1`),
 		check('llm_providers_wire_format', oneOf(t.wireFormat, WIRE_FORMATS)),
+		check('llm_providers_structured_mode', oneOf(t.structuredMode, STRUCTURED_MODES)),
 		// Upper-case env var names only: an API key pasted here by mistake is rejected.
 		check(
 			'llm_providers_env_key_name',
-			sql`length(${t.envKeyName}) between 1 and 64 and ${t.envKeyName} not glob '*[^A-Z0-9_]*'`
+			sql`${t.envKeyName} is null or (length(${t.envKeyName}) between 1 and 64 and ${t.envKeyName} not glob '*[^A-Z0-9_]*')`
 		)
 	]
 );
@@ -213,9 +222,17 @@ export const sentences = sqliteTable(
 		ngslBandMax: integer('ngsl_band_max'),
 		offListCount: integer('off_list_count').notNull().default(0),
 		licenseTag: text('license_tag').notNull(),
-		levelBand: integer('level_band')
+		levelBand: integer('level_band'),
+		/** Matched the content blocklist; kept (never deleted) but never used. */
+		blocked: integer('blocked', { mode: 'boolean' }).notNull().default(false),
+		blockedReason: text('blocked_reason'),
+		/** English mentions Tatoeba's stock names Tom or Mary (sessions cap how many they show). */
+		hasStockNames: integer('has_stock_names', { mode: 'boolean' }).notNull().default(false)
 	},
-	(t) => [uniqueIndex('sentences_tatoeba_id_en_unique').on(t.tatoebaIdEn)]
+	(t) => [
+		uniqueIndex('sentences_tatoeba_id_en_unique').on(t.tatoebaIdEn),
+		index('sentences_blocked_level_band').on(t.blocked, t.levelBand)
+	]
 );
 
 export const grammarTopics = sqliteTable(
@@ -231,6 +248,52 @@ export const grammarTopics = sqliteTable(
 	(t) => [
 		uniqueIndex('grammar_topics_code_unique').on(t.code),
 		check('grammar_topics_code', oneOf(t.code, TOPIC_CODES))
+	]
+);
+
+// --- Cloze pool (Phase 5a) ----------------------------------------------------------------------
+
+/**
+ * Cloze items built from Tatoeba sentences: the gap is chosen by code, lexical distractors come
+ * from the LLM, rules and a blind LLM critic validate. Failed items are kept for analysis.
+ */
+export const clozeItems = sqliteTable(
+	'cloze_items',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		sentenceId: integer('sentence_id')
+			.notNull()
+			.references(() => sentences.id, { onDelete: 'restrict' }),
+		gapType: text('gap_type', { enum: CLOZE_GAP_TYPES }).notNull(),
+		/** Index of the gap in the sentence's token list (see generation/cloze/tokens.ts). */
+		tokenIndex: integer('token_index').notNull(),
+		answer: text('answer').notNull(),
+		/** The four options in display order (shuffled deterministically); '—' means "no word". */
+		options: text('options', { mode: 'json' }).$type<string[]>().notNull(),
+		/** Vietnamese gloss of the answer in this sentence (lexical gaps). */
+		answerVi: text('answer_vi'),
+		lexemeId: integer('lexeme_id').references(() => lexemes.id, { onDelete: 'restrict' }),
+		grammarTopicId: integer('grammar_topic_id').references(() => grammarTopics.id, { onDelete: 'restrict' }),
+		levelBand: integer('level_band').notNull(),
+		ruleOk: integer('rule_ok', { mode: 'boolean' }).notNull(),
+		/** Null when the critic did not run (the item already failed the rules). */
+		criticOk: integer('critic_ok', { mode: 'boolean' }),
+		validated: integer('validated', { mode: 'boolean' }).notNull().default(false),
+		rejectionReason: text('rejection_reason'),
+		criticNotes: text('critic_notes'),
+		/** Versions of the prompt modules used, e.g. "cloze-distractors@1+cloze-critic@1". */
+		promptVersion: text('prompt_version').notNull(),
+		/** Model(s) that produced/judged the item; null if no LLM was involved. */
+		model: text('model'),
+		/** Identity of the candidate (sentence, gap type, position, answer): reruns skip it. */
+		contentHash: text('content_hash').notNull(),
+		createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull()
+	},
+	(t) => [
+		uniqueIndex('cloze_items_content_hash_unique').on(t.contentHash),
+		index('cloze_items_validated_type_band').on(t.validated, t.gapType, t.levelBand),
+		index('cloze_items_sentence_id').on(t.sentenceId),
+		check('cloze_items_gap_type', oneOf(t.gapType, CLOZE_GAP_TYPES))
 	]
 );
 
@@ -250,6 +313,8 @@ export const cards = sqliteTable(
 		grammarTopicId: integer('grammar_topic_id').references(() => grammarTopics.id, {
 			onDelete: 'restrict'
 		}),
+		/** The cloze item this card practises (cloze cards, Phase 9). */
+		clozeItemId: integer('cloze_item_id').references(() => clozeItems.id, { onDelete: 'restrict' }),
 		promptMode: text('prompt_mode', { enum: PROMPT_MODES }).notNull().default('choice'),
 		// ts-fsrs Card
 		due: integer('due', { mode: 'timestamp_ms' }).notNull(),
@@ -272,6 +337,7 @@ export const cards = sqliteTable(
 			nullAsZero(t.sentenceId),
 			nullAsZero(t.grammarTopicId)
 		),
+		uniqueIndex('cards_cloze_item_unique').on(t.clozeItemId).where(sql`${t.clozeItemId} is not null`),
 		index('cards_due').on(t.due),
 		check('cards_kind', oneOf(t.kind, CARD_KINDS)),
 		check('cards_prompt_mode', oneOf(t.promptMode, PROMPT_MODES)),
@@ -352,7 +418,9 @@ export const generatedCache = sqliteTable(
 		validated: integer('validated', { mode: 'boolean' }).notNull().default(false),
 		validationNotes: text('validation_notes'),
 		/** Set when a session takes the item, so it is never served twice. */
-		servedAt: integer('served_at', { mode: 'timestamp_ms' })
+		servedAt: integer('served_at', { mode: 'timestamp_ms' }),
+		/** Version string of the prompt module that produced the item. */
+		promptVersion: text('prompt_version')
 	},
 	(t) => [
 		uniqueIndex('generated_cache_content_hash_unique').on(t.contentHash),
@@ -382,4 +450,34 @@ export const writingSubmissions = sqliteTable(
 		check('writing_submissions_status', oneOf(t.status, WRITING_STATUSES)),
 		check('writing_submissions_cefr_estimate', oneOf(t.cefrEstimate, CEFR_LEVELS))
 	]
+);
+
+// --- LLM call log -------------------------------------------------------------------------------
+
+/**
+ * One row per HTTP attempt to an LLM provider: metadata only. Prompt and response text and API
+ * keys are never stored. provider_id is deliberately not a foreign key, so the log survives
+ * provider deletion.
+ */
+export const llmCalls = sqliteTable(
+	'llm_calls',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+		providerId: integer('provider_id').notNull(),
+		model: text('model').notNull(),
+		/** What the call was for, e.g. 'cloze' or 'writing_feedback'. */
+		purpose: text('purpose').notNull(),
+		/** A structured mode, or 'text' for plain text generation. */
+		mode: text('mode').notNull(),
+		/** 1-based HTTP attempt number within one generate call (retries, repair, fallback). */
+		attempt: integer('attempt').notNull(),
+		ok: integer('ok', { mode: 'boolean' }).notNull(),
+		httpStatus: integer('http_status'),
+		errorCode: text('error_code'),
+		inputTokens: integer('input_tokens'),
+		outputTokens: integer('output_tokens'),
+		latencyMs: integer('latency_ms').notNull()
+	},
+	(t) => [index('llm_calls_created_at').on(t.createdAt)]
 );

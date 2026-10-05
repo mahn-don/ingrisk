@@ -208,11 +208,17 @@ settings(id = 1, desired_retention, weekly_goal_days, default_session_budget, ne
 -- CHECKs: desired_retention 0.70–0.97, weekly_goal_days 1–7, default_session_budget 1–60,
 -- new_cards_per_day 0–50 (added by migration 0001).
 
-llm_providers(id, name UNIQUE, base_url, model, wire_format, env_key_name,
-              enabled, is_fallback)
--- env_key_name names an environment variable, e.g. 'OPENAI_API_KEY'; a CHECK allows only
--- [A-Z0-9_], 1–64 chars. At most one row has is_fallback = 1 (partial unique index).
--- NO COLUMN EVER HOLDS A KEY.
+llm_providers(id, name UNIQUE, base_url, model, wire_format, structured_mode,
+              env_key_name, enabled, is_fallback)
+-- env_key_name names an environment variable, e.g. 'OPENAI_API_KEY'; NULL for a provider
+-- without a key (local Ollama); otherwise a CHECK allows only [A-Z0-9_], 1–64 chars.
+-- structured_mode defaults to 'json_schema'. At most one row has is_fallback = 1.
+-- NO COLUMN EVER HOLDS A KEY. (structured_mode and nullable env_key_name: migration 0002.)
+
+llm_calls(id, created_at, provider_id, model, purpose, mode, attempt, ok, http_status,
+          error_code, input_tokens, output_tokens, latency_ms)
+-- one row per HTTP attempt; never prompt/response text or keys. provider_id is not a
+-- foreign key, so the log survives provider deletion. (migration 0002)
 
 user_profile(id = 1, theta, cefr_estimate, vstep_estimate, ielts_estimate,
              toeic_estimate, vocab_theta, grammar_theta, reading_theta,
@@ -227,15 +233,29 @@ lexemes(id, headword UNIQUE, pos, ngsl_rank, freq_band, forms, supplementary,
 -- forms: JSON array of every inflected form; supplementary: NGSL days/months/number words.
 collocations(id, lexeme_id → lexemes ON DELETE CASCADE, chunk, example_en, example_vi)
 sentences(id, en_text, vi_text, source, tatoeba_id_en UNIQUE, tatoeba_id_vi,
-          ngsl_band_max, off_list_count, license_tag, level_band)
--- tatoeba_id_en is NULL for LLM-generated sentences.
+          ngsl_band_max, off_list_count, license_tag, level_band,
+          blocked, blocked_reason, has_stock_names)
+-- tatoeba_id_en is NULL for LLM-generated sentences. level_band = max(1, ngsl_band_max ?? 1).
+-- blocked: matched the content blocklist (kept, never deleted; blocked_reason names the term);
+-- has_stock_names: the English contains Tom or Mary. (last three: migration 0003)
+
+cloze_items(id, sentence_id → sentences, gap_type, token_index, answer, options,
+            answer_vi, lexeme_id → lexemes, grammar_topic_id → grammar_topics,
+            level_band, rule_ok, critic_ok, validated, rejection_reason, critic_notes,
+            prompt_version, model, content_hash UNIQUE, created_at)
+-- The validated cloze pool (Part II §5; migration 0003). All references ON DELETE RESTRICT.
+-- token_index: the gap's index in the sentence's token list; options: JSON array of 4 strings
+-- in display order ('—' = no word); critic_ok is NULL when the rules already failed.
+-- Rejected items are kept (validated = 0) for inspection.
 
 cards(id, kind, lexeme_id → lexemes, sentence_id → sentences,
-      grammar_topic_id → grammar_topics,          -- all ON DELETE RESTRICT
+      grammar_topic_id → grammar_topics,
+      cloze_item_id → cloze_items,                -- all ON DELETE RESTRICT
       prompt_mode,
       due, stability, difficulty, elapsed_days, scheduled_days, learning_steps,
       reps, lapses, state, last_review)           -- every field of ts-fsrs Card
 -- UNIQUE (kind, lexeme_id, sentence_id, grammar_topic_id), NULLs counted as 0.
+-- cloze_item_id (migration 0003) is UNIQUE when not NULL: a pool item becomes at most one card.
 review_logs(id, card_id → cards ON DELETE RESTRICT,
             rating, state, due, stability, difficulty, elapsed_days,
             last_elapsed_days, scheduled_days, learning_steps, review,
@@ -248,7 +268,8 @@ sessions(id, client_session_id UNIQUE, started_at, ended_at, budget_min, shape,
 
 generated_cache(id, kind, params_hash, content_hash UNIQUE, level_band,
                 payload_json, model, created_at, validated, validation_notes,
-                served_at)
+                served_at, prompt_version)
+-- prompt_version (migration 0003): the version string of the prompt module that produced it.
 
 writing_submissions(id, session_id → sessions ON DELETE SET NULL, prompt,
                     user_text, corrected_text, errors_json, cefr_estimate, status,
@@ -258,59 +279,76 @@ grammar_topics(id, code UNIQUE, name_vi, name_en, l1_interference)
 -- seeded with the 10 codes of Part I §6.
 ```
 
-Indexes: `cards(due)`, `review_logs(card_id, review)`, `collocations(lexeme_id)`, `generated_cache(kind, params_hash)`, `generated_cache(kind, validated, served_at)`, `writing_submissions(status)`, plus the unique indexes above.
+Indexes: `cards(due)`, `review_logs(card_id, review)`, `sentences(blocked, level_band)`, `cloze_items(validated, gap_type, level_band)`, `cloze_items(sentence_id)`, `llm_calls(created_at)`, `collocations(lexeme_id)`, `generated_cache(kind, params_hash)`, `generated_cache(kind, validated, served_at)`, `writing_submissions(status)`, plus the unique indexes above.
 
-Enumerations: `kind` ∈ cloze | translate | grammar | reading | error (cards and generated_cache); `status` ∈ queued | scored | failed; `wire_format` ∈ openai | anthropic; `shape` ∈ quick | read | write; `writing_status` ∈ none | queued | scored; `feedback_mode` ∈ direct | indirect; `prompt_mode` ∈ choice | typing; `state` ∈ New | Learning | Review | Relearning and `rating` ∈ Manual | Again | Hard | Good | Easy (ts-fsrs `State` and `Rating` names); CEFR columns ∈ A1 … C2; `code` ∈ the taxonomy codes.
+Enumerations: `kind` ∈ cloze | translate | grammar | reading | error (cards and generated_cache); `status` ∈ queued | scored | failed; `wire_format` ∈ openai | anthropic; `structured_mode` ∈ json_schema | tool | json_prompt; `shape` ∈ quick | read | write; `writing_status` ∈ none | queued | scored; `feedback_mode` ∈ direct | indirect; `prompt_mode` ∈ choice | typing; `state` ∈ New | Learning | Review | Relearning and `rating` ∈ Manual | Again | Hard | Good | Easy (ts-fsrs `State` and `Rating` names); CEFR columns ∈ A1 … C2; `code` ∈ the taxonomy codes; `gap_type` ∈ lexical | article | preposition | verb_form.
 
 Connection (`src/lib/server/db/client.ts`): `DATABASE_PATH` (default `data/app.db`), pragmas `journal_mode = WAL` (required by Litestream), `foreign_keys = ON`, `busy_timeout = 5000`, `synchronous = NORMAL`. Migrations run at server start from the SvelteKit `init` hook; a failed migration stops the server.
 
 ### 4. LLM layer
 
-One interface, two adapters, both normalized to `LlmResponse { text, parsedJson, usage, model, finishReason }`.
+`src/lib/server/llm/`: a provider-agnostic client that turns a request plus a **Zod schema** into a validated object. Zod is the single source of truth; JSON Schema is derived from it (Zod 4 `toJSONSchema`).
 
-**OpenAI-compatible adapter** — covers OpenAI, OpenRouter, DeepSeek, Gemini's compatible endpoint, Ollama:
-- `POST {base_url}/chat/completions`
-- System prompt is a message with `role: "system"`
-- Structured output via `response_format: { type: "json_schema" }`
-- Tool arguments arrive as a **JSON string** needing a parse step
-- Usage: `usage.prompt_tokens` / `usage.completion_tokens`
+```ts
+generateStructured({ purpose, system, user, schema, maxTokens = 2000, temperature?, providerId?, fallback = true })
+  → { data, usage: { inputTokens, outputTokens }, model, providerId, attempts }
+generateText({ purpose, system, user, ... }) → { text, usage, model, providerId, attempts }
+```
 
-**Anthropic adapter:**
-- `POST {base_url}/v1/messages`, with an `anthropic-version` header
-- System prompt is a **top-level `system` parameter**, not a message
-- `max_tokens` is **required**
-- Tool use via `stop_reason: "tool_use"`; the content block's `input` is **already parsed JSON**
-- Usage: `usage.input_tokens` / `usage.output_tokens`
+**Wire formats.**
+- Anthropic: `POST {base_url}/v1/messages`, headers `x-api-key` and `anthropic-version: 2023-06-01`; `system` is a top-level parameter; `max_tokens` is required. `temperature` is only sent when the caller sets it, because models after Claude Opus 4.6 reject any value other than 1.0. Usage: `usage.input_tokens` / `usage.output_tokens`.
+- OpenAI-compatible: `POST {base_url}/chat/completions`, `Authorization: Bearer`; the system prompt is a `role: "system"` message; `max_completion_tokens` for api.openai.com, `max_tokens` for other compatible servers; default temperature 0.4. Usage: `usage.prompt_tokens` / `usage.completion_tokens`.
 
-These four divergences (system placement, tool-argument shape, usage field names, streaming event shapes) are the whole reason the abstraction exists. Each needs its own test.
+**Structured-output modes** (`llm_providers.structured_mode`):
 
-API keys are read from `process.env`, never written to the database, never logged, never included in an error message. A test asserts that an adapter error's string form does not contain the key.
+| Mode | Anthropic | OpenAI-compatible |
+|---|---|---|
+| `json_schema` (default) | `output_config: { format: { type: "json_schema", schema } }` (GA; the beta `output_format` is deprecated) | `response_format: { type: "json_schema", json_schema: { name, schema, strict: true } }` |
+| `tool` | one tool + `tool_choice: { type: "tool", name }`; `tool_use.input` is already an object (forced tool use is rejected by the newest Claude models) | one function + `tool_choice: { type: "function", ... }`; `arguments` is a JSON string |
+| `json_prompt` | the schema in the system prompt; JSON extracted from the text | same |
 
-Retry with exponential backoff on 429 and 5xx; fall back to the provider flagged `is_fallback`; surface a clear Vietnamese error if all fail. Do not hard-code prices: model tiers and rates change often.
+**Schema sanitizer.** `toProviderSchema(schema, target)` strips the keywords a target rejects and appends them to the field's `description` as a hint: OpenAI strict (`minItems`, `maxItems`, `minLength`, `maxLength`, `minimum`, `maximum`, `pattern`, …; plus `additionalProperties: false` and every property in `required`), Anthropic (`minimum`, `maximum`, `multipleOf`, `minLength`, `maxLength`, `maxItems`, and `minItems` other than 0/1; `additionalProperties: false`). Stripped constraints are still enforced, because **every response is validated locally with the original Zod schema**.
+
+**Pipeline.** Call in the provider's mode → extract the JSON (native output, tool input, or text with code fences and prose stripped) → normalize string enums case-insensitively (`"art"` → `"ART"`; providers don't guarantee enum casing) → validate with Zod → on failure, **one repair attempt** (the previous output and the Zod issues are sent back), then `LlmSchemaError` (raw output and issues, redacted). A refusal (Anthropic `stop_reason: "refusal"`, OpenAI `message.refusal` or `finish_reason: "content_filter"`) throws `LlmRefusalError`, never retried.
+
+**Transport, retry, fallback.** Global `fetch` (injected for tests), 60 s timeout per attempt. Network errors, timeouts and HTTP 429/500/502/503/504/529 are retried up to 3 attempts with exponential backoff and jitter, honouring `Retry-After`; other 4xx fail at once. The provider flagged `is_fallback` is used after retries are exhausted, on 401/403, or when the key's env var is missing — never on a schema error or a refusal. `base_url` must be `https://`, except `http://localhost` / `http://127.0.0.1` (Ollama).
+
+**Call log.** `llm_calls` gets one row per HTTP attempt: provider, model, purpose, mode, attempt, ok, HTTP status, error code, token counts, latency. **Never prompt or response text, never a key.** `countSince(ts)` feeds rate limiting (Phase 11); `usageSince(ts)` gives token totals per provider and model.
+
+**Secrets.** The key is read from `process.env[provider.env_key_name]` at call time, never cached, never logged. Every thrown error passes through `redact()`, which removes the keys, `Authorization` / `x-api-key` header values and `sk-…` tokens, and errors carry no `cause` chain.
+
+Surface a clear Vietnamese error in the UI if all providers fail. Do not hard-code prices: model tiers and rates change often.
 
 ### 5. Generation and the validation pipeline
 
-Generation is batch and ahead of time, never during a session. A cron job at 03:00 (Asia/Ho_Chi_Minh) calls `/api/cron/prefetch` (guarded by a secret), filling `generated_cache` to N items per kind based on `known_band_ceiling`.
+Generation is batch and ahead of time, never during a session. Every prompt module in `src/lib/server/llm/prompts/` exports a `PROMPT_VERSION` string, stored with every item it produces (`cloze_items.prompt_version`, `generated_cache.prompt_version`), so a changed prompt can be traced and its items rebuilt.
 
-Every generated item passes:
+**Content import** (`npm run content:import`, Phase 5a). Reads the Phase 1 JSON with `fs` (never bundled into app code) and upserts idempotently: `ngsl.json` → `lexemes` by headword (supplementary words that are also ranked headwords, `may` and `march`, are skipped; glosses added later are never overwritten); `tatoeba-en-vi.json` → `sentences` by `tatoeba_id_en`. A second run changes nothing. Sentences matching `src/lib/server/content/blocklist.txt` (one term per line, `prefix*` allowed, matched on lemmas via the NGSL form map, so "killed" matches `kill`) are imported with `blocked = 1` and never deleted; `--reblock` re-applies the current list to every row. The import reports the blocked count and the top 20 matching terms.
+
+**The cloze pool** (`npm run cloze:build`, Phase 5a). Cloze items are not generated sentences: they are gaps in real Tatoeba sentences, stored in `cloze_items`.
+
+1. **Candidates** (`generation/cloze/candidates.ts`, deterministic). Eligible sentences: not blocked, 4–15 words, `off_list_count` ≤ 2. At most one lexical and one grammar candidate per sentence.
+   - *lexical*: a content word whose lemma is in NGSL and not in the function-word stoplist (`stoplist.ts`); never a capitalized word mid-sentence, never part of a hyphenated compound; the highest band ≤ sentence band + 1 wins. Item band = max(sentence band, lemma band); `lexeme_id` is linked.
+   - *article* (ART): options `a, an, the, —`.
+   - *preposition* (PRE): distractors from a fixed confusion table (`prepositions.ts`); the infinitive "to" is not a preposition.
+   - *verb_form*: a lemma with at least four real forms (one in -ing); options are other forms of the same lemma that occur in the sentence corpus and are real words (NGSL form lists include nonstandard forms such as "makeing"). No modals, no noun uses after a determiner. Topic SVA when the gap is present simple after a third-person subject, else TNS.
+   - Selection is seeded and stable: candidates are bucketed by (gap type, band), each bucket ordered by content hash, and taken round-robin, so a run spreads across types and bands.
+2. **Distractors** (lexical gaps only; prompt `llm/prompts/cloze-distractors.ts`). 10 items per call; each gives the sentence with `___`, the answer and the Vietnamese sentence, and asks for 3 distractors (same part of speech and inflection, similar frequency, plausible but clearly wrong) with a one-line reason each, plus `answer_vi`. All schema fields are required; the array size is not sent to Anthropic (Part II §4) and Zod enforces exactly 3 locally.
+3. **Rules** (`generation/cloze/rules.ts`, deterministic): 4 options, distinct case-insensitively, exactly one equal to the answer; each a single token or `—`; lowercase unless the gap is sentence-initial, then all four capitalized; the answer is exactly at `token_index`; for lexical gaps, no distractor is a form of the answer's lemma, every distractor is a real word (the word list or an NGSL headword) and none is on the blocklist. A failure stores `rule_ok = 0` with `rejection_reason = rule:<code> (...)`.
+4. **Blind critic** (prompt `llm/prompts/cloze-critic.ts`; `generation/cloze/critic.ts`). The sentence is shown filled with each of the four options, labelled A–D in display order, never saying which is intended (no translation either). For each version: grammatical? natural? meaning plausible? An item is accepted only if exactly one version is acceptable on all three and it is the answer. 10 items per call.
+5. **Store.** Options are shuffled with a seed derived from the item's content hash. Rule and critic failures are stored with `validated = 0`; items whose LLM call failed (schema error after repair, refusal, exhausted retries, an item missing from the answer) are not stored, so the next run retries them. Existing `content_hash` values are skipped.
+
+**Cost guards.** `--max-calls` (default 50) stops the run once it has made that many HTTP attempts (`llm_calls` rows; checked before each batch, so one batch's retries may overshoot slightly). The run refuses to start when `llm_calls` already holds `LLM_DAILY_CALL_CAP` (env, default 500) rows in the last 24 h, and stops if it would reach the cap. `--dry-run` runs the whole pipeline on an in-memory copy of the content with a canned LLM (no network, no writes).
+
+**Evaluation** (`npm run eval:cloze -- --n 30`) writes `tmp/eval/cloze-<timestamp>.md`: a table of `n` random validated items (sentence with gap, options, answer, `answer_vi`, gap type, band, a column to mark bad items) and 10 random rejected items with their reasons. Phase 5's hard gate is a human finding at most 1 bad item among 30.
+
+**Other generated kinds** (Phase 5b). A cron job at 03:00 (Asia/Ho_Chi_Minh) calls `/api/cron/prefetch` (guarded by a secret), filling `generated_cache` to N items per kind based on `known_band_ceiling`. Every generated item passes:
 1. **Schema validation** with Zod.
 2. **Rule checks:** the gap word occurs in the sentence; exactly one option is correct; distractors differ from each other and from the answer; content words are within the target band ceiling; the Vietnamese translation is non-empty and differs from the English.
 3. **Critic pass** (optional): a second cheap call asking "is this item unambiguous and correctly keyed?" Enable it for any kind with a high rejection rate.
 4. Store with `validated = true` only if all checks pass; otherwise store with notes for inspection and regenerate.
 
 Threshold: over 95% pass rate per kind before relying on it.
-
-**Cloze schema**
-```ts
-const ClozeItem = z.object({
-  sentence_en: z.string(),
-  gap_word: z.string(),
-  distractors: z.array(z.string()).length(3),
-  vi_translation: z.string(),
-  target_lexeme: z.string(),
-  cefr_band: z.enum(['A1','A2','B1','B2','C1','C2'])
-}).strict();
-```
 
 **Writing-feedback schema**
 ```ts
@@ -403,7 +441,7 @@ Vietnamese is a small language on Tatoeba: expect a few thousand usable EN–VI 
 - **One commit per phase**, small diffs, secret scanning on.
 - **Review subagents** get a bounded question: "Compared with the phase plan, report only correctness defects and unmet requirements. No style comments, no architectural suggestions, no new features."
 
-### 12 phases (0–11)
+### 12 phases (0–11; Phase 5 is split into 5a and 5b)
 
 Dependency order: data and engines first, app shell and deploy in the middle, features last. Deploy sits at Phase 7 so every later phase ends with a real deploy, surfacing infrastructure problems early instead of at the end.
 
@@ -539,30 +577,44 @@ This phase produces asset files with a one-off script in `tool/`. It adds no app
 
 #### Phase 4 — LLM provider layer
 
-> Build `src/lib/server/llm/` with an `LlmClient` interface `generate(request) → LlmResponse` and two adapters.
+> Build `src/lib/server/llm/` (design in Part II §4): a provider-agnostic client that turns a request plus a Zod schema into a validated object. No exercise prompts (Phase 5), no routes, no UI.
 >
-> **OpenAI-compatible adapter** — `POST {base_url}/chat/completions`; system prompt as a `system` role message; structured output via `response_format: { type: "json_schema" }`; tool arguments arrive as a JSON **string** requiring a parse; usage from `usage.prompt_tokens` / `usage.completion_tokens`.
+> - **Modes:** add `structured_mode` (`json_schema` | `tool` | `json_prompt`, default `json_schema`) to `llm_providers` and make `env_key_name` nullable (keyless Ollama), in a migration.
+> - **Schemas:** derive JSON Schema from Zod; `toProviderSchema(schema, target)` sanitizes for OpenAI strict and Anthropic, moving stripped constraints into descriptions. Always validate locally with Zod.
+> - **Client:** `generateStructured({ purpose, system, user, schema, maxTokens, temperature, providerId })` → call, extract JSON, normalize enum casing, validate, one repair attempt, else `LlmSchemaError`; refusals throw `LlmRefusalError`. Also `generateText`.
+> - **Transport:** injected `fetch`, 60 s timeout, retry (3 attempts, backoff with jitter, `Retry-After`) on network errors, timeouts and 429/500/502/503/504/529; fallback to `is_fallback` after exhausted retries, on 401/403 or a missing key env var, never on schema errors or refusals. `base_url` must be https except localhost.
+> - **Call log:** `llm_calls` table and repository (`record`, `countSince`, `usageSince`); one row per HTTP attempt; no text, no keys.
+> - **Secrets:** key read from `process.env` at call time; every error goes through `redact()`.
+> - **Tools:** `npm run llm:provider:add` (insert a provider row) and `npm run llm:smoke -- --provider <name>` (one live structured call; never in CI).
 >
-> **Anthropic adapter** — `POST {base_url}/v1/messages` with an `anthropic-version` header; system prompt as a **top-level `system` parameter**; `max_tokens` **required**; tool use via `stop_reason: "tool_use"` with content-block `input` already parsed; usage from `usage.input_tokens` / `usage.output_tokens`.
->
-> Normalize both to `LlmResponse { text, parsedJson, usage, model, finishReason }`. Read provider config from the `llm_providers` table; read the API key from `process.env[provider.env_key_name]`. **The key must never be written to the database, logged, or included in an error message** — add a test asserting a thrown adapter error's string form does not contain the key.
->
-> Add exponential-backoff retry on 429 and 5xx, and fallback to the provider flagged `is_fallback`.
->
-> Test with mocked HTTP only, never a live endpoint. Write one explicit test per wire-format divergence: system-prompt placement, tool-argument shape, usage field names, required `max_tokens`.
+> Test with mocked `fetch` only: request shape per wire format and mode, response parsing, JSON extraction, enum normalization, the sanitizer, repair, retry, fallback, refusals, key safety (no key in any error or `llm_calls` row) and config validation.
 
-**Result:** LLM layer with both adapters and divergence tests.
-**Check:** `npm test` passes, including the key-leak test.
+**Result:** LLM layer with both wire formats, three structured modes, and tests.
+**Check:** `npm test` passes, including the key-leak test; `npm run llm:smoke -- --provider <name>` returns a parsed object with your real key.
 
 ---
 
-#### Phase 5 — Generation and validation pipeline
+#### Phase 5a — Content import and the cloze pipeline
 
-> Build `src/lib/server/generation/`.
+> Build the content import and the cloze pool (design in Part II §5; plan in `plans/phase-05a.md`).
 >
-> Import the Phase 1 assets from `src/lib/server/content/` on first run: `ngsl.json` → `lexemes` with `freq_band` and `license_tag`; `tatoeba-en-vi.json` → `sentences` with `source='tatoeba'` and `license_tag`, using its `ngsl_band_max` and `off_list_count` fields to set `level_band`.
+> - **Import:** `npm run content:import` upserts `ngsl.json` → `lexemes` and `tatoeba-en-vi.json` → `sentences` idempotently, with `level_band = max(1, ngsl_band_max ?? 1)`, `has_stock_names`, and the blocklist (`src/lib/server/content/blocklist.txt`, matched on lemmas) marking sentences `blocked` without deleting them; `--reblock` re-applies it.
+> - **Data model:** `cloze_items`, `cards.cloze_item_id` (unique when not null), `generated_cache.prompt_version`, sentences `blocked` / `blocked_reason` / `has_stock_names`.
+> - **Pipeline:** deterministic candidates (lexical, article, preposition, verb_form) → LLM distractors for lexical gaps (10 per call) → deterministic rules → blind critic (10 per call) → store, failures included. Every prompt module exports a version string.
+> - **Commands:** `npm run cloze:build -- [--bands 1-3] [--types ...] [--limit 200] [--provider name] [--max-calls 50] [--dry-run]` with cost guards (`--max-calls`, `LLM_DAILY_CALL_CAP`), and `npm run eval:cloze -- [--n 30]`.
 >
-> Implement generators for: cloze, reading passage plus 2 comprehension questions, VI→EN translation task, error-correction drill targeting a given grammar topic code, and writing feedback. Each gets a prompt template in `src/lib/server/llm/prompts/` and a Zod schema. The cloze and writing-feedback schemas are in Part II §5 of `docs/architecture.md`.
+> Test with a mocked LLM only: candidates, every rule, the critic's acceptance logic, batching and per-batch failure isolation, cost guards, and the import.
+
+**Result:** content imported, a validated cloze pool spread across gap types and bands.
+**Check:** `content:import` is a no-op the second time; `cloze:build -- --dry-run` runs end to end; in `eval:cloze`, a human finds at most 1 bad item among 30 validated items.
+
+---
+
+#### Phase 5b — Other generators and prefetch
+
+> Build the rest of `src/lib/server/generation/` (the cloze pool is Phase 5a).
+>
+> Implement generators for: reading passage plus 2 comprehension questions, VI→EN translation task, error-correction drill targeting a given grammar topic code, and writing feedback. Each gets a prompt template in `src/lib/server/llm/prompts/` (exporting a version string, as in Phase 5a) and a Zod schema. The writing-feedback schema is in Part II §5 of `docs/architecture.md`.
 >
 > Implement the validation pipeline: Zod parse → rule checks (gap word present in the sentence; exactly one correct option; distractors distinct from each other and from the answer; content words within the target band ceiling; Vietnamese translation present and different from the English) → store in `generated_cache` with `validated` and `validation_notes`.
 >
@@ -570,7 +622,7 @@ This phase produces asset files with a one-off script in `tool/`. It adds no app
 >
 > Add `npm run eval:generation` — generates 30 items, runs validation, prints the pass rate per kind.
 
-**Result:** content imported, generators working, validation pipeline, prefetch endpoint.
+**Result:** generators working, validation pipeline, prefetch endpoint.
 **Check:** run the eval; the pass rate must exceed 95% per kind. **Read 10 accepted items yourself** — validation catches structure, not teaching quality.
 
 ---
@@ -698,7 +750,7 @@ Deploy early, while the app is nearly empty. Infrastructure problems are much ch
 |---|---|
 | 1 | Pseudo-word list reviewed by hand; Tatoeba pair count known |
 | 3 | Intervals grow sensibly in a manual walkthrough |
-| 5 | Validation pass rate over 95% per kind, **and** 10 items read by a human |
+| 5 | In `eval:cloze`, a human finds at most 1 bad item among 30 validated items |
 | 7 | Database restored from backup successfully once |
 | 9 | A full session completes with the network cut mid-way |
 

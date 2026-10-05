@@ -15,6 +15,20 @@
       "when": 1791123867260,
       "tag": "0001_new_cards_per_day",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791132959817,
+      "tag": "0002_llm_providers_and_calls",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791168694155,
+      "tag": "0003_cloze_pool",
+      "breakpoints": true
     }
   ]
 }
