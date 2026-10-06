@@ -2,7 +2,7 @@
 // session composed afterwards reads them (they apply from the next session).
 import { z } from 'zod';
 import type { DbOrTx } from '../db/client.ts';
-import { type Settings, settingsRepo } from '../db/repositories/settings.ts';
+import { type LearningSettings as LearningSettingsRow, learningSettingsRepo } from '../db/repositories/settings.ts';
 import { FEEDBACK_MODES } from '../db/schema.ts';
 
 export const BUDGET_CHOICES = [5, 8, 10] as const;
@@ -32,6 +32,7 @@ export function parseLearningForm(form: FormData): { ok: true; value: LearningSe
 	return { ok: false, fields: [...new Set(parsed.error.issues.map((i) => String(i.path[0])))] };
 }
 
-export function saveLearningSettings(db: DbOrTx, value: LearningSettings): Settings {
-	return settingsRepo(db).update(value);
+/** Saved for this profile only (profile_settings, Phase 12). */
+export function saveLearningSettings(db: DbOrTx, profileId: number, value: LearningSettings): LearningSettingsRow {
+	return learningSettingsRepo(db, profileId).update(value);
 }

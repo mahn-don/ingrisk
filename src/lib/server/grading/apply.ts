@@ -15,9 +15,9 @@ export type { GradedWriting };
  * graded error is mined into a card. Returns false if the submission was not queued (graded
  * already, e.g. by a parallel run).
  */
-export function applyWritingGrade(db: DbOrTx, submissionId: number, graded: GradedWriting, now: Date): boolean {
+export function applyWritingGrade(db: DbOrTx, profileId: number, submissionId: number, graded: GradedWriting, now: Date): boolean {
 	return db.transaction((tx) => {
-		const writing = writingRepo(tx);
+		const writing = writingRepo(tx, profileId);
 		const submission = writing.byId(submissionId);
 		if (submission?.status !== 'queued') return false;
 		writing.markScored(
@@ -32,16 +32,17 @@ export function applyWritingGrade(db: DbOrTx, submissionId: number, graded: Grad
 			},
 			now
 		);
-		const placement = placementRepo(tx);
+		const placement = placementRepo(tx, profileId);
 		const result = placement.resultByWritingSubmission(submissionId);
 		if (result !== undefined) {
 			const refined = graded.onTopic === false ? offTopicResult(result) : refineResult(result, graded.cefr);
-			applyResultToProfile(tx, placement.updateResult(result.id, refined), now);
+			applyResultToProfile(tx, profileId, placement.updateResult(result.id, refined), now);
 		}
 		if (graded.errors.length > 0) {
 			const mined = mineErrors(
 				tx,
-				{ correctedText: graded.correctedText, errors: graded.errors, viText: submission.prompt, levelBand: profileRepo(tx).get().knownBandCeiling },
+				profileId,
+				{ correctedText: graded.correctedText, errors: graded.errors, viText: submission.prompt, levelBand: profileRepo(tx, profileId).get().knownBandCeiling },
 				now
 			);
 			writing.markMined(submissionId, mined.created, now);

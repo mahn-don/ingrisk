@@ -13,6 +13,8 @@ import {
 	llmProviders,
 	placementAttempts,
 	placementResults,
+	profileSettings,
+	profiles,
 	type PlacementSubscores,
 	reviewLogs,
 	sentences,
@@ -20,7 +22,7 @@ import {
 	settings,
 	userProfile
 } from './schema.ts';
-import { createTestDb } from './test-db.ts';
+import { TEST_PROFILE, createTestDb } from './test-db.ts';
 
 function tableNames(db: Db): string[] {
 	return db.$client
@@ -34,6 +36,7 @@ function columnNames(db: Db, table: string): string[] {
 }
 
 const newCard = (overrides: Partial<typeof cards.$inferInsert> = {}): typeof cards.$inferInsert => ({
+	profileId: TEST_PROFILE,
 	kind: 'cloze',
 	due: new Date(1_800_000_000_000),
 	stability: 0,
@@ -65,6 +68,8 @@ describe('migrations', () => {
 			'llm_providers',
 			'placement_attempts',
 			'placement_results',
+			'profile_settings',
+			'profiles',
 			'review_logs',
 			'sentences',
 			'sessions',
@@ -75,18 +80,12 @@ describe('migrations', () => {
 		expect(db.select().from(grammarTopics).all().map((t) => t.code)).toEqual([
 			'ART', 'TNS', 'PLU', 'SVA', 'COP', 'PRE', 'COL', 'WFM', 'WOR', 'OTH'
 		]);
-		expect(db.select().from(settings).all()).toEqual([
-			{
-				id: 1,
-				desiredRetention: 0.9,
-				weeklyGoalDays: 5,
-				defaultSessionBudget: 8,
-				feedbackMode: 'direct',
-				newCardsPerDay: 10,
-				activeProviderId: null
-			}
+		expect(db.select().from(settings).all()).toEqual([{ id: 1, activeProviderId: null }]);
+		expect(db.select().from(profiles).all()).toMatchObject([{ id: TEST_PROFILE, name: 'Hồ sơ 1', emoji: null, archivedAt: null }]);
+		expect(db.select().from(profileSettings).all()).toEqual([
+			{ profileId: TEST_PROFILE, desiredRetention: 0.9, weeklyGoalDays: 5, defaultSessionBudget: 8, feedbackMode: 'direct', newCardsPerDay: 10 }
 		]);
-		expect(db.select().from(userProfile).all()).toMatchObject([{ id: 1, theta: null, knownBandCeiling: 1 }]);
+		expect(db.select().from(userProfile).all()).toMatchObject([{ id: 1, profileId: TEST_PROFILE, theta: null, knownBandCeiling: 1 }]);
 	});
 
 	it('is a no-op on an already migrated database', () => {
@@ -124,11 +123,9 @@ describe('migrations', () => {
 			);
 			db.$client.prepare('update settings set desired_retention = 0.85, active_provider_id = ?').run(providerId);
 			migrate(db, full);
-			expect(db.select().from(settings).get()).toMatchObject({
-				desiredRetention: 0.85,
-				activeProviderId: providerId,
-				newCardsPerDay: 10
-			});
+			// Since 0010 the learning settings live in profile_settings (profile 1).
+			expect(db.select().from(settings).get()).toMatchObject({ activeProviderId: providerId });
+			expect(db.select().from(profileSettings).get()).toMatchObject({ profileId: TEST_PROFILE, desiredRetention: 0.85, newCardsPerDay: 10 });
 			expect(db.$client.pragma('foreign_key_check')).toEqual([]);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
@@ -309,18 +306,20 @@ describe('schema guards', () => {
 		expect(clozeTypes.map((c) => c.type.toLowerCase())).toEqual(['integer', 'integer']);
 	});
 
-	it('allows exactly one settings row and one profile row', () => {
+	it('allows exactly one settings row, and one level row per profile', () => {
 		const db = createTestDb();
 		expect(() => db.insert(settings).values({ id: 2 }).run()).toThrow(/CHECK constraint failed/);
 		expect(() => db.insert(settings).values({ id: 1 }).run()).toThrow(/UNIQUE constraint failed/);
-		expect(() => db.insert(userProfile).values({ id: 2 }).run()).toThrow(/CHECK constraint failed/);
+		expect(() => db.insert(userProfile).values({ profileId: TEST_PROFILE }).run()).toThrow(/UNIQUE constraint failed/);
+		expect(() => db.insert(userProfile).values({ profileId: 99 }).run()).toThrow(/FOREIGN KEY/);
 	});
 
 	it('rejects values outside an enumeration or range', () => {
 		const db = createTestDb();
 		const raw = (statement: string) => () => db.$client.prepare(statement).run();
-		expect(raw("update settings set feedback_mode = 'loud'")).toThrow(/CHECK constraint failed: settings_feedback_mode/);
-		expect(() => db.update(settings).set({ desiredRetention: 0.5 }).run()).toThrow(/CHECK/);
+		expect(raw("update profile_settings set feedback_mode = 'loud'")).toThrow(/CHECK constraint failed: profile_settings_feedback_mode/);
+		expect(() => db.update(profileSettings).set({ desiredRetention: 0.5 }).run()).toThrow(/CHECK/);
+		expect(raw("insert into profiles (name, created_at) values ('', 0)")).toThrow(/CHECK constraint failed: profiles_name_length/);
 		expect(
 			raw(`insert into cards (kind, due, stability, difficulty, elapsed_days, scheduled_days,
 				learning_steps, reps, lapses, state) values ('cloze', 0, 0, 0, 0, 0, 0, 0, 0, 'Done')`)
@@ -407,6 +406,7 @@ describe('create, read and update every content table', () => {
 		const row = db
 			.insert(placementResults)
 			.values({
+				profileId: TEST_PROFILE,
 				takenAt: new Date(1_800_000_000_000),
 				theta: 3.2,
 				cefr: 'A2',
@@ -422,7 +422,7 @@ describe('create, read and update every content table', () => {
 
 	it('placement_attempts allows one in progress', () => {
 		const db = createTestDb();
-		const start = { startedAt: new Date(1_800_000_000_000), stateJson: {} };
+		const start = { profileId: TEST_PROFILE, startedAt: new Date(1_800_000_000_000), stateJson: {} };
 		const first = db.insert(placementAttempts).values(start).returning().get();
 		expect(first).toMatchObject({ status: 'in_progress', part: 'A', resultId: null });
 		expect(() => db.insert(placementAttempts).values(start).run()).toThrow(/UNIQUE/);
@@ -437,6 +437,7 @@ describe('create, read and update every content table', () => {
 		const card = db
 			.insert(cards)
 			.values({
+				profileId: TEST_PROFILE,
 				kind: 'cloze',
 				due: fsrsCard.due,
 				stability: fsrsCard.stability,
@@ -468,7 +469,7 @@ describe('create, read and update every content table', () => {
 
 		const log = db
 			.insert(reviewLogs)
-			.values({ cardId: card.id, rating: 'Good', state: 'Review', due: fsrsCard.due, stability: 3.1, difficulty: 5.4, elapsedDays: 2, lastElapsedDays: 1, scheduledDays: 4, learningSteps: 0, review: new Date(1_800_000_000_999), oldS: 3.1, newS: 8.2, oldD: 5.4, newD: 5.3 })
+			.values({ profileId: TEST_PROFILE, cardId: card.id, rating: 'Good', state: 'Review', due: fsrsCard.due, stability: 3.1, difficulty: 5.4, elapsedDays: 2, lastElapsedDays: 1, scheduledDays: 4, learningSteps: 0, review: new Date(1_800_000_000_999), oldS: 3.1, newS: 8.2, oldD: 5.4, newD: 5.3 })
 			.returning()
 			.get();
 		expect(db.select().from(reviewLogs).get()).toEqual(log);
@@ -478,7 +479,7 @@ describe('create, read and update every content table', () => {
 		const db = createTestDb();
 		const card = db.insert(cards).values(newCard()).returning().get();
 		db.insert(reviewLogs)
-			.values({ cardId: card.id, rating: 'Again', state: 'New', due: new Date(0), stability: 0, difficulty: 0, elapsedDays: 0, lastElapsedDays: 0, scheduledDays: 0, learningSteps: 0, review: new Date(0), oldS: 0, newS: 1, oldD: 0, newD: 5 })
+			.values({ profileId: TEST_PROFILE, cardId: card.id, rating: 'Again', state: 'New', due: new Date(0), stability: 0, difficulty: 0, elapsedDays: 0, lastElapsedDays: 0, scheduledDays: 0, learningSteps: 0, review: new Date(0), oldS: 0, newS: 1, oldD: 0, newD: 5 })
 			.run();
 		expect(() => db.delete(cards).where(eq(cards.id, card.id)).run()).toThrow(/FOREIGN KEY constraint failed/);
 		expect(db.select().from(reviewLogs).all()).toHaveLength(1);
@@ -493,7 +494,7 @@ describe('create, read and update every content table', () => {
 		expect(db.select().from(grammarTopics).where(eq(grammarTopics.code, 'ART')).get()?.nameVi).toBe('Mạo từ (a/an/the)');
 		const session = db
 			.insert(sessions)
-			.values({ clientSessionId: 'c-9', startedAt: new Date(0), budgetMin: 5, shape: 'quick' })
+			.values({ profileId: TEST_PROFILE, clientSessionId: 'c-9', startedAt: new Date(0), budgetMin: 5, shape: 'quick' })
 			.returning()
 			.get();
 		db.update(sessions).set({ endedAt: new Date(300_000), itemsDone: 15 }).where(eq(sessions.id, session.id)).run();

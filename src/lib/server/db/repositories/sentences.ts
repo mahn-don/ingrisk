@@ -1,22 +1,29 @@
-import { and, asc, between, count, eq, isNotNull, lte, ne, notInArray } from 'drizzle-orm';
+import { and, asc, between, count, eq, isNotNull, isNull, lte, ne, notInArray } from 'drizzle-orm';
 import type { DbOrTx } from '../client.ts';
 import { sentences } from '../schema.ts';
 
 export type SentenceRow = typeof sentences.$inferSelect;
 export type NewSentence = Omit<typeof sentences.$inferInsert, 'id'>;
 
+/** Shared content only: a learner's mined sentences (profile_id set) are never read back here. */
+const shared = isNull(sentences.profileId);
+
+/**
+ * Sentences: the shared Tatoeba content. Mining inserts a learner's own corrected sentences here
+ * with their profile_id (Phase 12); every read below sees shared rows only.
+ */
 export function sentencesRepo(db: DbOrTx) {
 	return {
 		/** All Tatoeba sentences, keyed by English sentence id. */
 		byTatoebaId(): Map<number, SentenceRow> {
-			const rows = db.select().from(sentences).where(isNotNull(sentences.tatoebaIdEn)).all();
+			const rows = db.select().from(sentences).where(and(shared, isNotNull(sentences.tatoebaIdEn))).all();
 			return new Map(rows.map((r) => [r.tatoebaIdEn as number, r]));
 		},
 		all(): SentenceRow[] {
-			return db.select().from(sentences).orderBy(asc(sentences.id)).all();
+			return db.select().from(sentences).where(shared).orderBy(asc(sentences.id)).all();
 		},
 		byId(id: number): SentenceRow | undefined {
-			return db.select().from(sentences).where(eq(sentences.id, id)).get();
+			return db.select().from(sentences).where(and(shared, eq(sentences.id, id))).get();
 		},
 		insert(row: NewSentence): SentenceRow {
 			return db.insert(sentences).values(row).returning().get();
@@ -32,7 +39,7 @@ export function sentencesRepo(db: DbOrTx) {
 			return db
 				.select()
 				.from(sentences)
-				.where(and(eq(sentences.blocked, false), lte(sentences.offListCount, maxOffList), ne(sentences.source, 'user_error')))
+				.where(and(shared, eq(sentences.blocked, false), lte(sentences.offListCount, maxOffList), ne(sentences.source, 'user_error')))
 				.orderBy(asc(sentences.id))
 				.all();
 		},
@@ -46,6 +53,7 @@ export function sentencesRepo(db: DbOrTx) {
 				.from(sentences)
 				.where(
 					and(
+						shared,
 						eq(sentences.source, 'tatoeba'),
 						eq(sentences.blocked, false),
 						eq(sentences.hasStockNames, false),
@@ -61,7 +69,7 @@ export function sentencesRepo(db: DbOrTx) {
 				});
 		},
 		countBlocked(): number {
-			return db.select({ n: count() }).from(sentences).where(eq(sentences.blocked, true)).get()?.n ?? 0;
+			return db.select({ n: count() }).from(sentences).where(and(shared, eq(sentences.blocked, true))).get()?.n ?? 0;
 		}
 	};
 }

@@ -2,7 +2,7 @@
 
 **Revision 3 (web + VPS).** Supersedes the earlier Flutter/mobile design. The learning methodology carries over unchanged; the technical design and roadmap are rewritten for a web app on a VPS.
 
-**What it is:** a personal, single-user, non-commercial web app that teaches English **reading, writing, vocabulary and grammar** to a Vietnamese speaker. No audio of any kind, no microphone. Sessions fit a 5–10 minute gap and are used in a phone's browser, always online. The UI is entirely in Vietnamese; code, comments, docs and commit messages are in English.
+**What it is:** a personal, non-commercial web app behind one password, with Netflix-style learner profiles (Phase 12), that that teaches English **reading, writing, vocabulary and grammar** to a Vietnamese speaker. No audio of any kind, no microphone. Sessions fit a 5–10 minute gap and are used in a phone's browser, always online. The UI is entirely in Vietnamese; code, comments, docs and commit messages are in English.
 
 **How to use this document (for Claude Code):** this is the single source of truth for the project. Part I is the learning design, Part II the technical architecture, Part III the phased build plan with the prompt for each phase. When working on a phase, read Part II and that phase's section in Part III; consult Part I when the phase references it. Do not build anything outside the current phase's scope.
 
@@ -293,11 +293,28 @@ Implemented in `src/lib/server/db/schema.ts` (Drizzle), with migrations in `src/
 **Conventions:** timestamps are `integer` Unix milliseconds; JSON columns are `text`; booleans are `integer` 0/1; enumerations are `text` with a CHECK on the allowed values; every foreign key states its `ON DELETE`. Column names are snake_case (TypeScript properties are camelCase).
 
 ```sql
-settings(id = 1, desired_retention, weekly_goal_days, default_session_budget, new_cards_per_day,
-         feedback_mode, active_provider_id → llm_providers ON DELETE SET NULL)
--- single row, CHECK (id = 1); seeded: 0.9, 5, 8, 10, 'direct', NULL.
--- CHECKs: desired_retention 0.70–0.97, weekly_goal_days 1–7, default_session_budget 1–60,
--- new_cards_per_day 0–50 (added by migration 0001).
+profiles(id, name UNIQUE, emoji, created_at, archived_at)
+-- (Phase 12, migration 0010) Learner profiles behind the one app password. name: 1–30 chars
+-- (CHECK); emoji optional; archived_at hides a profile from the picker and keeps all its data
+-- (no hard delete). Migration 0010 creates profile 1, "Hồ sơ 1", and gives it every existing row.
+
+profile_settings(profile_id PK → profiles ON DELETE CASCADE, desired_retention,
+                 weekly_goal_days, default_session_budget, feedback_mode, new_cards_per_day)
+-- (migration 0010) A profile's learning settings, moved out of settings with the same CHECKs:
+-- desired_retention 0.70–0.97, weekly_goal_days 1–7, default_session_budget 1–60,
+-- new_cards_per_day 0–50. Defaults 0.9, 5, 8, 'direct', 10. Profile 1 got the old values.
+
+settings(id = 1, active_provider_id → llm_providers ON DELETE SET NULL)
+-- single row, CHECK (id = 1): only what every profile shares (since migration 0010).
+
+-- Per-learner tables (migration 0010): user_profile, placement_results, placement_attempts, cards,
+-- review_logs, sessions, writing_submissions and drill_results carry
+-- profile_id → profiles ON DELETE RESTRICT, NOT NULL (DEFAULT 1 in SQL, never relied on: the app
+-- always sets it). Mined sentences (source user_error) and cloze_items (gap_type user_error) carry a
+-- nullable profile_id (their owner; NULL = shared content). Tatoeba content, generated_cache and the
+-- shared cloze pool have no owner. A profile's queries see the shared rows plus its own rows only.
+-- llm_calls.profile_id (nullable, no FK) marks grading calls made for a learner;
+-- auth_sessions.profile_id → profiles ON DELETE SET NULL is the profile picked after login.
 
 llm_providers(id, name UNIQUE, base_url, model, wire_format, structured_mode,
               env_key_name, enabled, is_fallback)
@@ -311,10 +328,11 @@ llm_calls(id, created_at, provider_id, model, purpose, mode, attempt, ok, http_s
 -- one row per HTTP attempt; never prompt/response text or keys. provider_id is not a
 -- foreign key, so the log survives provider deletion. (migration 0002)
 
-user_profile(id = 1, theta, cefr_estimate, vstep_estimate, ielts_estimate,
+user_profile(id, profile_id UNIQUE → profiles, theta, cefr_estimate, vstep_estimate, ielts_estimate,
              toeic_estimate, vocab_theta, grammar_theta, reading_theta,
              writing_theta, known_band_ceiling, updated_at)
--- single row, CHECK (id = 1); seeded with null estimates and known_band_ceiling = 1.
+-- one row per profile (migration 0010 dropped the single-row CHECK); a new profile gets one with
+-- null estimates and known_band_ceiling = 1, like a fresh install.
 
 user_profile.placement_skipped_at  -- "Bỏ qua, bắt đầu từ cơ bản" chosen (migration 0006)
 
@@ -363,8 +381,9 @@ cards(id, kind, lexeme_id → lexemes, sentence_id → sentences,
       due, stability, difficulty, elapsed_days, scheduled_days, learning_steps,
       reps, lapses, state, last_review,           -- every field of ts-fsrs Card
       suspended)                                  -- 0009: hidden by the learner (review book)
--- UNIQUE (kind, lexeme_id, sentence_id, grammar_topic_id), NULLs counted as 0.
--- cloze_item_id (migration 0003) is UNIQUE when not NULL: a pool item becomes at most one card.
+-- UNIQUE (profile_id, kind, lexeme_id, sentence_id, grammar_topic_id), NULLs counted as 0.
+-- cloze_item_id (migration 0003) is UNIQUE per profile when not NULL (since 0010): a pool item
+-- becomes at most one card for each learner.
 -- suspended (migration 0009, default 0): "Tạm ẩn" in the review book. A suspended card is out of
 -- every queue (due, new, mined, focus sessions), every count and the forecast; its review_logs stay.
 review_logs(id, card_id → cards ON DELETE RESTRICT,
@@ -417,7 +436,7 @@ grammar_topics(id, code UNIQUE, name_vi, name_en, l1_interference)
 -- seeded with the 10 codes of Part I §6.
 ```
 
-Indexes: `cards(due)`, `drill_results(answered_at)`, `sessions(finished_at)`, `sessions(status) WHERE status = 'in_progress'` (unique), `placement_attempts(status) WHERE status = 'in_progress'` (unique), `review_logs(card_id, review)`, `sentences(blocked, level_band)`, `cloze_items(validated, gap_type, level_band)`, `cloze_items(sentence_id)`, `llm_calls(created_at)`, `collocations(lexeme_id)`, `generated_cache(kind, params_hash)`, `generated_cache(kind, validated, served_at)`, `writing_submissions(status)`, plus the unique indexes above.
+Indexes (Phase 12 adds `cards(profile_id, state, due)`, `review_logs(profile_id, review)`, `sessions(profile_id, finished_at)`, `placement_results(profile_id, id)`, `writing_submissions(profile_id, status)`, `drill_results(profile_id, answered_at)`, `sentences(profile_id)`, `cloze_items(profile_id)`, `llm_calls(profile_id, created_at)`; the in-progress unique indexes of sessions and placement_attempts are per profile): `cards(due)`, `drill_results(answered_at)`, `sessions(finished_at)`, `sessions(status) WHERE status = 'in_progress'` (unique), `placement_attempts(status) WHERE status = 'in_progress'` (unique), `review_logs(card_id, review)`, `sentences(blocked, level_band)`, `cloze_items(validated, gap_type, level_band)`, `cloze_items(sentence_id)`, `llm_calls(created_at)`, `collocations(lexeme_id)`, `generated_cache(kind, params_hash)`, `generated_cache(kind, validated, served_at)`, `writing_submissions(status)`, plus the unique indexes above.
 
 Enumerations: `kind` ∈ cloze | translate | grammar | reading | error (cards and generated_cache); `status` ∈ queued | scored | failed; `wire_format` ∈ openai | anthropic; `structured_mode` ∈ json_schema | tool | json_prompt; `shape` ∈ quick | read | write; `writing_status` ∈ none | queued | scored; `feedback_mode` ∈ direct | indirect; `prompt_mode` ∈ choice | typing; `state` ∈ New | Learning | Review | Relearning and `rating` ∈ Manual | Again | Hard | Good | Easy (ts-fsrs `State` and `Rating` names); CEFR columns ∈ A1 … C2; `code` ∈ the taxonomy codes; `gap_type` ∈ lexical | article | preposition | verb_form.
 
@@ -549,6 +568,7 @@ Constraining `topic_code` to the enum is what makes error mining work: free-text
 The app is on the public internet, so:
 - **A single password gate.** The password's argon2id hash (`npm run auth:hash`, which prompts twice with hidden input) lives in `APP_PASSWORD_HASH`. Unset or not an argon2id hash means nobody can log in and every page stays closed: it fails closed.
 - **The chokepoint is `handle` in `src/hooks.server.ts`**, not a layout: layout loads do not run for `+server.ts` endpoints, so a layout guard would leave `/api/*` open. Every request (pages, form actions, data requests, endpoints) resolves the session into `event.locals.session` and passes `accessFor()` (`src/lib/server/auth/guard.ts`). Only an explicit allowlist is public (the backup download `/api/backup` is not on it): `/login`, `/healthz` (Phase 7: `{ok, db, migrations}` only, for the deploy scripts), `/api/cron/*` (own secret), `/favicon.svg`, `/robots.txt`, `/_app/immutable/*`, `/_app/version.json`, `/_app/env.js` (not all of `/_app/`: `/_app/remote/*` would be server code). Anything else without a session: pages get 303 to `/login?next=<path>`, `/api/*` gets 401 JSON (503 JSON when login is not configured). `next` must be a same-origin relative path (never `//evil.com`, absolute URLs or backslash tricks), else `/`. `(app)/+layout.server.ts` only exposes session info; it is not a security boundary.
+- **Learner profiles (Phase 12):** after login the user picks or creates a profile on `/profiles`; the choice is stored on the login session (`auth_sessions.profile_id`) and `handle` puts it on `event.locals.profile`. Logged in without one (or with an archived one), every non-public path except `/profiles` redirects there (`/profiles?next=…`) and `/api/*` answers 409 JSON (`needsProfile()` in `guard.ts`); the public allowlist is unchanged. Every repository and server function that touches per-learner data takes `profileId` explicitly (`cardsRepo(db, profileId)`, `startSession(db, profileId, …)`); there is no global "current profile".
 - **Sessions are server-side** (`auth_sessions(id, created_at, expires_at, last_seen_at)`, migration 0005). The cookie `se_session` holds 32 random bytes (base64url); the table stores only their SHA-256, so a copy of the database cannot log anyone in. 30 days, sliding: on use, `last_seen_at` and the expiry move forward at most once an hour. Logout (a POST action) deletes the row and the cookie; an expired row is deleted when presented.
 - **Cookies:** `httpOnly`, `sameSite=lax`, `path=/`; `secure` from `COOKIE_SECURE` (default true). `false` is allowed for any `ORIGIN`, because the app is served over plain HTTP on an IP (Part 0, Decisions). With `false` and a non-local origin, the server logs a startup warning and the login page shows a small, non-blocking notice: "Kết nối không mã hóa". The theme preference (`system`/`light`/`dark`) is a cookie too, so the server renders `data-theme` on `<html>` and the first paint is right.
 - **`ORIGIN`** must equal the URL in the browser exactly (now `http://103.82.195.48:3000`; `http://localhost:3000` through an SSH tunnel); otherwise SvelteKit's CSRF check rejects the login form with 403. **It is read at build time** (`vite.config.ts` → `paths.origin`): adapter-node 6 (SvelteKit 3) has no runtime `ORIGIN` variable and, without `paths.origin`, assumes `https://<host>`, which over plain HTTP rejects every form POST. Build with `ORIGIN` set and rebuild after changing it.
@@ -635,11 +655,11 @@ Vietnamese is a small language on Tatoeba: expect a few thousand usable EN–VI 
 - **One commit per phase**, small diffs, secret scanning on.
 - **Review subagents** get a bounded question: "Compared with the phase plan, report only correctness defects and unmet requirements. No style comments, no architectural suggestions, no new features."
 
-### 12 phases (0–11; Phases 5 and 9 are each split in two)
+### 13 phases (0–12; Phases 5 and 9 are each split in two)
 
 Dependency order: data and engines first, app shell in the middle, features last.
 
-**Build order (changed after Phase 6, the owner's decision): 8 → 9a → 9b → 10 → 7 → 11.** The features (placement, session loop, settings) come before the deploy, which now follows Phase 10, and hardening stays last. The phase numbers and sections below are unchanged; `plans/roadmap.md` lists the phases in build order.
+**Build order (changed after Phase 6, the owner's decision): 8 → 9a → 9b → 10 → 7 → 11 → 12.** The features (placement, session loop, settings) come before the deploy, which now follows Phase 10, and hardening stays last. The phase numbers and sections below are unchanged; `plans/roadmap.md` lists the phases in build order.
 
 ---
 
@@ -964,6 +984,19 @@ Built after Phase 10 (the owner's build order). No reverse proxy and no TLS (Par
 - **Cloze:** article gaps only where a rule fixes the answer, and a critic check that no other option could also be correct.
 - **Content filter:** the blocklist now matches phrases and covers death, drinking and self-harm.
 - **Hardening:** a 60/hour in-memory limit on LLM routes; queued writing says why it is queued; a no-provider notice on Home; a test that migrates a database from every earlier version.
+
+---
+
+#### Phase 12 — Learner profiles
+
+> Netflix-style profiles behind the existing single app password. After login the user picks or creates a profile; each has its own placement, SRS, history, streak and learning settings. One hand-checked migration; every per-learner query scoped by `profileId`; a leakage test.
+
+**As built** (`plans/phase-12.md`):
+- **Data:** migration 0010 (hand-written, no table rebuild that drops data) adds `profiles` and `profile_settings`, `profile_id` on every per-learner table, owners on mined sentences and cloze items, and `llm_calls.profile_id`; all existing rows belong to profile 1, "Hồ sơ 1" (Part II §3).
+- **Auth:** the picked profile lives on the login session; `/profiles?next=…` until one is picked; `/api/*` answers 409 (Part II §6).
+- **Scoping:** learner repositories are `xRepo(db, profileId)`; the shared cloze pool (`clozeItemsRepo`) and a learner's view of it (`learnerClozeRepo`: shared items plus their own mined ones, "no card yet" meaning no card of theirs) are separate.
+- **UI:** `/profiles` (grid with level and streak, "+ Thêm hồ sơ", rename, archive with a confirm dialog), a header with the profile and "Đổi hồ sơ", Settings split into this profile's part and the shared part. A new profile starts with the placement-or-basics card.
+- **Background:** prefetch fills one shared stock for the highest band ceiling among non-archived profiles, counting cloze stock for the learner with the fewest unused items; queued writings of every profile are graded, each call logged for its learner. Streaks and freezes are recomputed per profile on read (no per-day job).
 
 ---
 

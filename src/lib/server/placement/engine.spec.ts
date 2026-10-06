@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { TEST_PROFILE } from '../db/test-db.ts';
 import type { PlacementView } from '../../placement.ts';
 import { placementRepo } from '../db/repositories/placement.ts';
 import { profileRepo } from '../db/repositories/profile.ts';
@@ -58,7 +59,7 @@ describe('the placement flow', () => {
 		expect(view.part).toBe('C');
 		if (view.part !== 'C') return;
 		expect(view.clozeSkipped).toBe(false);
-		const state = placementRepo(deps.db).attempt(view.attemptId)!.stateJson as { log: { part: string; item: unknown }[] };
+		const state = placementRepo(deps.db, TEST_PROFILE).attempt(view.attemptId)!.stateJson as { log: { part: string; item: unknown }[] };
 		const partA = state.log.filter((e) => e.part === 'A');
 		const partB = state.log.filter((e) => e.part === 'B');
 		expect(partB).toHaveLength(12);
@@ -70,7 +71,7 @@ describe('the placement flow', () => {
 		expect(new Set(partB.map((e) => e.item)).size).toBe(12);
 
 		const { resultId } = await submitPlacementWriting(deps, { attemptId: view.attemptId, skip: true });
-		const result = placementRepo(deps.db).result(resultId)!;
+		const result = placementRepo(deps.db, TEST_PROFILE).result(resultId)!;
 		expect(result.vocabBand).toBe(4);
 		expect(result.clozeTheta).toBeGreaterThan(4);
 		expect(result.writingStatus).toBe('none');
@@ -79,21 +80,21 @@ describe('the placement flow', () => {
 		expect(result.subscoresJson.lexical).toEqual({ correct: 6, total: 6 });
 		expect(result.subscoresJson.grammar).toEqual({ correct: 6, total: 6 });
 		expect(Object.values(result.subscoresJson.grammarByType).reduce((n, s) => n + s.total, 0)).toBe(6);
-		expect(profileRepo(deps.db).get()).toMatchObject({
+		expect(profileRepo(deps.db, TEST_PROFILE).get()).toMatchObject({
 			cefrEstimate: result.cefr,
 			knownBandCeiling: 4,
 			vocabTheta: 4,
 			theta: result.theta
 		});
-		expect(placementRepo(deps.db).attempt(view.attemptId)).toMatchObject({ status: 'completed', part: 'done', resultId });
-		expect(placementOverview(deps.db)).toEqual({ completed: true, inProgress: false });
+		expect(placementRepo(deps.db, TEST_PROFILE).attempt(view.attemptId)).toMatchObject({ status: 'completed', part: 'done', resultId });
+		expect(placementOverview(deps.db, TEST_PROFILE)).toEqual({ completed: true, inProgress: false });
 	});
 
 	it('alternates lexical and grammar items in Part B', () => {
 		const deps = engineDeps();
 		seedClozePool(deps.db, [1, 2, 3, 4, 5, 6, 7, 8], 12);
 		const { view } = runTo(deps, startPlacement(deps), { knowsUpTo: 3 });
-		const items = (placementRepo(deps.db).attempt(view.attemptId)!.stateJson as { b: { items: { type: string }[] } }).b.items;
+		const items = (placementRepo(deps.db, TEST_PROFILE).attempt(view.attemptId)!.stateJson as { b: { items: { type: string }[] } }).b.items;
 		expect(items.map((i) => i.type)).toEqual([
 			'lexical', 'article', 'lexical', 'preposition', 'lexical', 'verb_form',
 			'lexical', 'article', 'lexical', 'preposition', 'lexical', 'verb_form'
@@ -108,7 +109,7 @@ describe('the placement flow', () => {
 		const { view } = runTo(deps, startPlacement(deps), { knowsUpTo: 3 });
 		expect(view).toMatchObject({ part: 'C', clozeSkipped: true });
 		const { resultId } = await submitPlacementWriting(deps, { attemptId: view.attemptId, skip: true });
-		const result = placementRepo(deps.db).result(resultId)!;
+		const result = placementRepo(deps.db, TEST_PROFILE).result(resultId)!;
 		expect(result).toMatchObject({ vocabBand: 3, clozeTheta: null, abilityBand: 3, cefr: 'A2', reliabilityFlags: ['cloze_skipped'] });
 		expect(result.subscoresJson).toMatchObject({ lexical: null, grammar: null });
 	});
@@ -117,7 +118,7 @@ describe('the placement flow', () => {
 		const deps = engineDeps();
 		const { view } = runTo(deps, startPlacement(deps), { knowsUpTo: 8, falseAlarms: true });
 		const { resultId } = await submitPlacementWriting(deps, { attemptId: view.attemptId, skip: true });
-		const result = placementRepo(deps.db).result(resultId)!;
+		const result = placementRepo(deps.db, TEST_PROFILE).result(resultId)!;
 		// f = 1 corrects every hit rate to 0, so band 1 (the cap of 2 is tested in staircase.spec.ts).
 		expect(result.vocabBand).toBe(1);
 		expect(result.subscoresJson.falseAlarmRate).toBe(1);
@@ -142,7 +143,7 @@ describe('the server is authoritative', () => {
 		const next = answerPlacement(deps, { attemptId: view.attemptId, itemRef: (view as { ref: string }).ref, answer: true, responseMs: 900 });
 		const again = answerPlacement(deps, { attemptId: view.attemptId, itemRef: (view as { ref: string }).ref, answer: false, responseMs: 900 });
 		expect(again).toEqual(next);
-		const state = placementRepo(deps.db).attempt(view.attemptId)!.stateJson as { log: unknown[] };
+		const state = placementRepo(deps.db, TEST_PROFILE).attempt(view.attemptId)!.stateJson as { log: unknown[] };
 		expect(state.log).toHaveLength(1);
 	});
 
@@ -153,8 +154,8 @@ describe('the server is authoritative', () => {
 		const first = await submitPlacementWriting(deps, { attemptId: view.attemptId, skip: true });
 		const second = await submitPlacementWriting(deps, { attemptId: view.attemptId, text: 'Another try.' });
 		expect(second).toEqual(first);
-		expect(placementRepo(deps.db).resultCount()).toBe(1);
-		expect(writingRepo(deps.db).queued()).toEqual([]);
+		expect(placementRepo(deps.db, TEST_PROFILE).resultCount()).toBe(1);
+		expect(writingRepo(deps.db, TEST_PROFILE).queued()).toEqual([]);
 		expectError(() => answerPlacement(deps, { attemptId: view.attemptId, itemRef: 'A0.0', answer: true, responseMs: 1 }), 409, 'finished');
 	});
 
@@ -170,7 +171,7 @@ describe('the server is authoritative', () => {
 		const deps = engineDeps();
 		const view = startPlacement(deps);
 		answerPlacement(deps, { attemptId: view.attemptId, itemRef: (view as { ref: string }).ref, answer: true, responseMs: 1e9 });
-		const [entry] = (placementRepo(deps.db).attempt(view.attemptId)!.stateJson as { log: Record<string, number>[] }).log;
+		const [entry] = (placementRepo(deps.db, TEST_PROFILE).attempt(view.attemptId)!.stateJson as { log: Record<string, number>[] }).log;
 		expect(entry.answeredAt - entry.shownAt).toBe(1000);
 		expect(entry.responseMs).toBe(600_000);
 	});
@@ -186,7 +187,7 @@ describe('resume and retake', () => {
 		const restarted: EngineDeps = { ...engineDeps(), db: deps.db };
 		expect(currentPlacement(restarted)).toEqual(view);
 		expect(startPlacement(restarted)).toEqual(view);
-		expect(placementOverview(deps.db)).toEqual({ completed: false, inProgress: true });
+		expect(placementOverview(deps.db, TEST_PROFILE)).toEqual({ completed: false, inProgress: true });
 	});
 
 	it('restart abandons the attempt in progress', () => {
@@ -194,7 +195,7 @@ describe('resume and retake', () => {
 		const first = startPlacement(deps);
 		const second = startPlacement(deps, { restart: true });
 		expect(second.attemptId).not.toBe(first.attemptId);
-		expect(placementRepo(deps.db).attempt(first.attemptId)?.status).toBe('abandoned');
+		expect(placementRepo(deps.db, TEST_PROFILE).attempt(first.attemptId)?.status).toBe('abandoned');
 		expect(currentPlacement(deps)?.attemptId).toBe(second.attemptId);
 	});
 
@@ -206,19 +207,19 @@ describe('resume and retake', () => {
 		const two = runTo(deps, startPlacement(deps), { knowsUpTo: 6 }).view;
 		const second = await submitPlacementWriting(deps, { attemptId: two.attemptId, skip: true });
 
-		const repo = placementRepo(deps.db);
+		const repo = placementRepo(deps.db, TEST_PROFILE);
 		expect(repo.resultCount()).toBe(2);
 		const old = repo.result(first.resultId)!;
 		const latest = repo.result(second.resultId)!;
 		expect(latest.abilityBand).toBeGreaterThan(old.abilityBand);
-		expect(profileRepo(deps.db).get()).toMatchObject({ knownBandCeiling: latest.vocabBand, cefrEstimate: latest.cefr });
-		expect(resultView(deps.db, second.resultId)?.previous).toEqual({
+		expect(profileRepo(deps.db, TEST_PROFILE).get()).toMatchObject({ knownBandCeiling: latest.vocabBand, cefrEstimate: latest.cefr });
+		expect(resultView(deps.db, TEST_PROFILE, second.resultId)?.previous).toEqual({
 			id: old.id,
 			takenAt: old.takenAt.getTime(),
 			cefr: old.cefr,
 			abilityBand: old.abilityBand
 		});
-		expect(resultView(deps.db, first.resultId)?.previous).toBeNull();
+		expect(resultView(deps.db, TEST_PROFILE, first.resultId)?.previous).toBeNull();
 	});
 });
 
@@ -231,12 +232,12 @@ describe('Part C grading', () => {
 		const { view } = runTo(deps, startPlacement(deps), { knowsUpTo: 4 });
 		const { resultId } = await submitPlacementWriting(deps, { attemptId: view.attemptId, text: `  ${text} ` });
 		expect(grade).toHaveBeenCalledWith({ prompt_vi: expect.stringContaining('Đề bài'), user_text: text, level_band: 4 });
-		const result = placementRepo(deps.db).result(resultId)!;
+		const result = placementRepo(deps.db, TEST_PROFILE).result(resultId)!;
 		expect(result.writingStatus).toBe('scored');
 		expect(result.subscoresJson.writing).toBe('B1');
-		const submission = writingRepo(deps.db).byId(result.writingSubmissionId!)!;
+		const submission = writingRepo(deps.db, TEST_PROFILE).byId(result.writingSubmissionId!)!;
 		expect(submission).toMatchObject({ status: 'scored', sessionId: null, userText: text, cefrEstimate: 'B1' });
-		expect(profileRepo(deps.db).get().writingTheta).toBe(3);
+		expect(profileRepo(deps.db, TEST_PROFILE).get().writingTheta).toBe(3);
 	});
 
 	it('a failed grade leaves the writing queued', async () => {
@@ -244,8 +245,8 @@ describe('Part C grading', () => {
 		const deps = engineDeps({ grade: async () => Promise.reject(new Error('provider down')), logError });
 		const { view } = runTo(deps, startPlacement(deps), { knowsUpTo: 4 });
 		const { resultId } = await submitPlacementWriting(deps, { attemptId: view.attemptId, text });
-		expect(placementRepo(deps.db).result(resultId)?.writingStatus).toBe('queued');
-		expect(writingRepo(deps.db).queued()).toHaveLength(1);
+		expect(placementRepo(deps.db, TEST_PROFILE).result(resultId)?.writingStatus).toBe('queued');
+		expect(writingRepo(deps.db, TEST_PROFILE).queued()).toHaveLength(1);
 		expect(logError).toHaveBeenCalledOnce();
 	});
 
@@ -253,7 +254,7 @@ describe('Part C grading', () => {
 		const deps = engineDeps({ grade: null });
 		const { view } = runTo(deps, startPlacement(deps), { knowsUpTo: 4 });
 		const { resultId } = await submitPlacementWriting(deps, { attemptId: view.attemptId, text });
-		expect(placementRepo(deps.db).result(resultId)?.writingStatus).toBe('queued');
+		expect(placementRepo(deps.db, TEST_PROFILE).result(resultId)?.writingStatus).toBe('queued');
 	});
 
 	it('a timeout finishes queued; a late grade still refines the result', async () => {
@@ -263,12 +264,12 @@ describe('Part C grading', () => {
 		seedClozePool(deps.db, [6, 7, 8], 12);
 		const { view } = runTo(deps, startPlacement(deps), { knowsUpTo: 8 });
 		const { resultId } = await submitPlacementWriting(deps, { attemptId: view.attemptId, text });
-		const repo = placementRepo(deps.db);
+		const repo = placementRepo(deps.db, TEST_PROFILE);
 		expect(repo.result(resultId)).toMatchObject({ writingStatus: 'queued', cefr: 'B2' });
 		release({ cefr: 'C1', correctedText: text, errors: [] });
 		await late;
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(repo.result(resultId)).toMatchObject({ writingStatus: 'scored', cefr: 'C1' });
-		expect(profileRepo(deps.db).get().cefrEstimate).toBe('C1');
+		expect(profileRepo(deps.db, TEST_PROFILE).get().cefrEstimate).toBe('C1');
 	});
 });

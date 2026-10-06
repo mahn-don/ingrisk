@@ -3,7 +3,7 @@
 // mines the errors into cards (grading/apply.ts).
 import { placementRepo } from '../db/repositories/placement.ts';
 import { profileRepo } from '../db/repositories/profile.ts';
-import { writingRepo } from '../db/repositories/writing.ts';
+import { queuedWritingsAllProfiles } from '../db/repositories/writing.ts';
 import type { CallBudget } from '../generation/batch.ts';
 import { startBudget } from '../generation/budget.ts';
 import type { LlmDeps } from '../llm/client.ts';
@@ -23,7 +23,9 @@ export const toGradedWriting = (feedback: BaseFeedback & Partial<WritingFeedback
 });
 
 /** Grade one submission: a writing task, or a translation against its reference. */
-export async function gradeSubmission(submission: WritingSubmission, levelBand: number, llm: LlmDeps): Promise<GradedWriting> {
+export async function gradeSubmission(submission: WritingSubmission, levelBand: number, deps: LlmDeps): Promise<GradedWriting> {
+	// Logged as this learner's usage.
+	const llm: LlmDeps = { ...deps, profileId: submission.profileId };
 	if (submission.taskKind === 'translation') {
 		const graded = await gradeTranslation(
 			{ vi: submission.prompt, reference_en: submission.referenceEn ?? '', user_en: submission.userText, level_band: levelBand },
@@ -53,24 +55,24 @@ export async function gradeQueuedWritings(
 	deps: { llm: LlmDeps; dailyCap: number }
 ): Promise<QueuedGradingSummary> {
 	const db = deps.llm.db;
-	const writing = writingRepo(db);
-	const placement = placementRepo(db);
 	const summary: QueuedGradingSummary = { graded: 0, failed: 0, remaining: 0 };
-	const queued = writing.queued();
+	// Every profile's queue: grading is background work, done for all learners.
+	const queued = queuedWritingsAllProfiles(db);
 	if (queued.length === 0) return summary;
 	const budget = options.budget ?? startBudget(db, deps.llm.now(), { maxCalls: options.maxCalls, dailyCap: deps.dailyCap });
 	for (const submission of queued) {
 		if (!budget.canCall()) break;
-		const level = placement.resultByWritingSubmission(submission.id)?.abilityBand ?? profileRepo(db).get().knownBandCeiling;
+		const learner = submission.profileId;
+		const level = placementRepo(db, learner).resultByWritingSubmission(submission.id)?.abilityBand ?? profileRepo(db, learner).get().knownBandCeiling;
 		try {
 			const graded = await gradeSubmission(submission, level, deps.llm);
-			if (applyWritingGrade(db, submission.id, graded, deps.llm.now())) summary.graded++;
+			if (applyWritingGrade(db, learner, submission.id, graded, deps.llm.now())) summary.graded++;
 		} catch (error) {
 			if (!(error instanceof LlmError)) throw error;
 			summary.failed++;
 			break;
 		}
 	}
-	summary.remaining = writing.queued().length;
+	summary.remaining = queuedWritingsAllProfiles(db).length;
 	return summary;
 }

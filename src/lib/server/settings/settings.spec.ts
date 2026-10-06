@@ -11,7 +11,7 @@ import { llmCallsRepo } from '../db/repositories/llm-calls.ts';
 import { providersRepo } from '../db/repositories/providers.ts';
 import { sessionsRepo } from '../db/repositories/sessions.ts';
 import { settingsRepo } from '../db/repositories/settings.ts';
-import { createTestDb } from '../db/test-db.ts';
+import { TEST_PROFILE, createTestDb } from '../db/test-db.ts';
 import type { PrefetchSummary } from '../generation/prefetch.ts';
 import { PREFETCH_LOCK } from '../generation/stock.ts';
 import { cannedWorld, fixtureDb } from '../generation/test-fixtures.ts';
@@ -54,7 +54,7 @@ describe('learning settings', () => {
 		const db = createTestDb();
 		const parsed = parseLearningForm(formOf({ desiredRetention: '0.8999999', newCardsPerDay: '50', defaultSessionBudget: '10', weeklyGoalDays: '7', feedbackMode: 'indirect' }));
 		if (!parsed.ok) throw new Error('expected valid');
-		expect(saveLearningSettings(db, parsed.value)).toMatchObject({ desiredRetention: 0.9, newCardsPerDay: 50, defaultSessionBudget: 10, weeklyGoalDays: 7, feedbackMode: 'indirect' });
+		expect(saveLearningSettings(db, TEST_PROFILE, parsed.value)).toMatchObject({ desiredRetention: 0.9, newCardsPerDay: 50, defaultSessionBudget: 10, weeklyGoalDays: 7, feedbackMode: 'indirect' });
 	});
 
 	it('changes apply to the next composition', () => {
@@ -63,17 +63,17 @@ describe('learning settings', () => {
 		const save = (newCardsPerDay: string, defaultSessionBudget = '5') => {
 			const parsed = parseLearningForm(formOf({ ...valid, newCardsPerDay, defaultSessionBudget }));
 			if (!parsed.ok) throw new Error('expected valid');
-			saveLearningSettings(fx.db, parsed.value);
+			saveLearningSettings(fx.db, TEST_PROFILE, parsed.value);
 		};
 		save('2');
-		const first = startSession(fx.db, T0);
+		const first = startSession(fx.db, TEST_PROFILE, T0);
 		expect(first.items.filter((i) => i.isNew)).toHaveLength(2);
 		save('0', '10');
-		expect(startSession(fx.db, new Date(T0.getTime() + 60_000))).toMatchObject({ sessionId: null, items: [], reason: 'all_done' });
+		expect(startSession(fx.db, TEST_PROFILE, new Date(T0.getTime() + 60_000))).toMatchObject({ sessionId: null, items: [], reason: 'all_done' });
 		save('4', '10');
-		const next = startSession(fx.db, new Date(T0.getTime() + 120_000));
+		const next = startSession(fx.db, TEST_PROFILE, new Date(T0.getTime() + 120_000));
 		expect(next.items.filter((i) => i.isNew)).toHaveLength(4);
-		expect(sessionsRepo(fx.db).byId(next.sessionId!)?.budgetMin).toBe(10);
+		expect(sessionsRepo(fx.db, TEST_PROFILE).byId(next.sessionId!)?.budgetMin).toBe(10);
 	});
 });
 
@@ -263,7 +263,7 @@ describe('suspended cards and settings', () => {
 	it('cardsRepo.dueNow brings a card forward', () => {
 		const fx = setup();
 		const card = fx.addDueCard({ overdueDays: -2 });
-		expect(cardsRepo(fx.db).dueNow(card.id, T0)).toBe(true);
-		expect(cardsRepo(fx.db).byId(card.id)?.due).toEqual(T0);
+		expect(cardsRepo(fx.db, TEST_PROFILE).dueNow(card.id, T0)).toBe(true);
+		expect(cardsRepo(fx.db, TEST_PROFILE).byId(card.id)?.due).toEqual(T0);
 	});
 });

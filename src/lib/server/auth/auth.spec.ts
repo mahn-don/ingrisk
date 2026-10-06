@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { authSessionsRepo } from '../db/repositories/auth-sessions.ts';
 import { createTestDb } from '../db/test-db.ts';
 import { authConfig } from './config.ts';
-import { accessFor, isPublicPath } from './guard.ts';
+import { accessFor, isPublicPath, needsProfile } from './guard.ts';
 import { sanitizeNext } from './next.ts';
 import { createLoginLimiter } from './rate-limit.ts';
-import { SESSION_TOUCH_MS, SESSION_TTL_MS, createSession, deleteSession, hashToken, resolveSession } from './sessions.ts';
+import { SESSION_TOUCH_MS, SESSION_TTL_MS, createSession, deleteSession, hashToken, resolveSession, selectProfile } from './sessions.ts';
+import { TEST_PROFILE } from '../db/test-db.ts';
 
 const T0 = new Date('2026-10-05T02:00:00Z');
 const at = (ms: number) => new Date(T0.getTime() + ms);
@@ -17,14 +18,14 @@ describe('sessions', () => {
 		expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/); // 32 random bytes, base64url
 		expect(expiresAt).toEqual(at(SESSION_TTL_MS));
 		const row = authSessionsRepo(db).get(hashToken(token))!;
-		expect(row).toEqual({ id: hashToken(token), createdAt: T0, expiresAt, lastSeenAt: T0 });
+		expect(row).toEqual({ id: hashToken(token), createdAt: T0, expiresAt, lastSeenAt: T0, profileId: null });
 		expect(JSON.stringify(row)).not.toContain(token);
 	});
 
 	it('reads a session without writing within the hour', () => {
 		const db = createTestDb();
 		const { token, expiresAt } = createSession(db, T0);
-		expect(resolveSession(db, token, at(SESSION_TOUCH_MS - 1))).toEqual({ expiresAt, refreshed: false });
+		expect(resolveSession(db, token, at(SESSION_TOUCH_MS - 1))).toEqual({ expiresAt, profileId: null, refreshed: false });
 		expect(authSessionsRepo(db).get(hashToken(token))!.lastSeenAt).toEqual(T0);
 	});
 
@@ -32,7 +33,7 @@ describe('sessions', () => {
 		const db = createTestDb();
 		const { token } = createSession(db, T0);
 		const later = at(SESSION_TOUCH_MS);
-		expect(resolveSession(db, token, later)).toEqual({ expiresAt: new Date(later.getTime() + SESSION_TTL_MS), refreshed: true });
+		expect(resolveSession(db, token, later)).toEqual({ expiresAt: new Date(later.getTime() + SESSION_TTL_MS), profileId: null, refreshed: true });
 		expect(authSessionsRepo(db).get(hashToken(token))).toMatchObject({ lastSeenAt: later, expiresAt: new Date(later.getTime() + SESSION_TTL_MS) });
 		// 29 days later, still alive because it slid.
 		expect(resolveSession(db, token, at(29 * 24 * 3600_000 + SESSION_TOUCH_MS))).not.toBeNull();
@@ -159,5 +160,22 @@ describe('access guard', () => {
 		expect(accessFor('/stats', { configured: false, authenticated: false })).toBe('login');
 		expect(accessFor('/api/x', { configured: false, authenticated: true })).toBe('not-configured');
 		expect(accessFor('/login', { configured: false, authenticated: false })).toBe('allow');
+	});
+
+	it('needs a profile everywhere but the picker and the public paths (Phase 12)', () => {
+		for (const p of ['/', '/stats', '/settings', '/session', '/api/session/start', '/placement', '/review', '/profilesx']) expect(needsProfile(p), p).toBe(true);
+		for (const p of ['/profiles', '/login', '/healthz', '/api/cron/prefetch', '/_app/immutable/x.js']) expect(needsProfile(p), p).toBe(false);
+	});
+});
+
+describe('profile selection', () => {
+	it('binds the login session to a profile; a fresh login has none', () => {
+		const db = createTestDb();
+		const { token } = createSession(db, T0);
+		expect(resolveSession(db, token, T0)?.profileId).toBeNull();
+		selectProfile(db, token, TEST_PROFILE);
+		expect(resolveSession(db, token, T0)?.profileId).toBe(TEST_PROFILE);
+		selectProfile(db, 'not a token', 99);
+		expect(resolveSession(db, token, T0)?.profileId).toBe(TEST_PROFILE);
 	});
 });

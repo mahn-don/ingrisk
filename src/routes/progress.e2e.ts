@@ -197,3 +197,107 @@ test("Home's today card", async ({ page }) => {
 	await expect(page.getByTestId('today-week')).toContainText('Tuần này');
 	await expect(page.getByTestId('today-next')).toContainText('Lần ôn tới');
 });
+
+test.describe('learner profiles (Phase 12)', () => {
+	const homeNumbers = async (page: Page) => ({
+		due: await page.getByTestId('count-due').textContent(),
+		fresh: await page.getByTestId('count-new').textContent(),
+		learning: await page.getByTestId('count-learning').textContent(),
+		streak: await page.getByTestId('today-streak').textContent()
+	});
+
+	test('a second profile does a session; profile 1 keeps its due counts and streak', async ({ page }) => {
+		await login(page, '/');
+		await expect(page.getByTestId('profile-current')).toHaveText('Hồ sơ: Hồ sơ 1');
+		const before = await homeNumbers(page);
+		expect(Number(before.streak)).toBeGreaterThan(0);
+		await page.goto('/stats');
+		const statsStreak = await page.getByTestId('stats-streak').textContent();
+
+		// "Đổi hồ sơ" → "+ Thêm hồ sơ": a new profile starts like a fresh install.
+		await page.getByRole('link', { name: 'Đổi hồ sơ' }).click();
+		await expect(page).toHaveURL('/profiles');
+		await page.getByTestId('profile-add').click();
+		const create = page.getByTestId('profile-create');
+		await create.getByLabel('Tên (1–30 ký tự)').fill('Bé Na');
+		await create.getByLabel('Biểu tượng (không bắt buộc), ví dụ 🐱').fill('🐱');
+		await create.getByRole('button', { name: 'Tạo hồ sơ' }).click();
+		await expect(page).toHaveURL('/');
+		await expect(page.getByTestId('profile-current')).toHaveText('Hồ sơ: 🐱 Bé Na');
+		await expect(page.getByTestId('placement-onboarding')).toBeVisible();
+		await expect(page.getByTestId('count-due')).toHaveText('0');
+		await expect(page.getByTestId('today-streak')).toHaveText('0');
+		await page.getByRole('button', { name: 'Bỏ qua, bắt đầu từ cơ bản' }).click();
+		await expect(page.getByTestId('placement-onboarding')).toHaveCount(0);
+
+		// A quick session of new cards, every answer right.
+		const started = await startSessionAt(page, '/session?budget=5&shape=quick');
+		expect(started.items.length).toBeGreaterThanOrEqual(5);
+		for (const [k, item] of started.items.entries()) {
+			const card = page.getByTestId('session-item');
+			await expect(card).toHaveAttribute('data-card-id', String(item.cardId));
+			await card.getByRole('button', { name: item.answer === '—' ? '(không cần từ nào)' : item.answer, exact: true }).click();
+			await page.getByRole('button', { name: k === started.items.length - 1 ? 'Xem kết quả' : 'Tiếp', exact: true }).click();
+		}
+		await expect(page.getByTestId('session-done')).toBeVisible();
+		await page.getByRole('link', { name: 'Về trang Hôm nay' }).click();
+		await expect(page.getByTestId('today-streak')).toHaveText('1');
+
+		// Back to profile 1: nothing changed.
+		await page.getByRole('link', { name: 'Đổi hồ sơ' }).click();
+		await expect(page.getByTestId('profiles-grid')).toContainText('Chuỗi: 1 ngày');
+		await page.getByRole('button', { name: 'Học với hồ sơ Hồ sơ 1', exact: true }).click();
+		await expect(page).toHaveURL('/');
+		await expect(page.getByTestId('profile-current')).toHaveText('Hồ sơ: Hồ sơ 1');
+		expect(await homeNumbers(page)).toEqual(before);
+		await page.goto('/stats');
+		await expect(page.getByTestId('stats-streak')).toHaveText(statsStreak!);
+
+		// The second profile's cards are its own.
+		const db = new Database(DB, { readonly: true });
+		try {
+			const owners = db.prepare('select distinct profile_id from cards where id in (' + started.items.map(() => '?').join(',') + ')').pluck().all(...started.items.map((i) => i.cardId));
+			expect(owners).toHaveLength(1);
+			expect(owners[0]).not.toBe(1);
+		} finally {
+			db.close();
+		}
+	});
+
+	test('rename and archive (with a confirm dialog); the data stays', async ({ page }) => {
+		await login(page, '/profiles', null);
+		await expect(page).toHaveURL('/profiles');
+		const grid = page.getByTestId('profiles-grid');
+		await grid.locator('li', { hasText: 'Bé Na' }).getByRole('button', { name: 'Sửa' }).click();
+		const edit = page.getByTestId('profile-edit');
+		await edit.getByLabel('Tên (1–30 ký tự)').fill('Na');
+		await edit.getByRole('button', { name: 'Lưu' }).click();
+		await expect(page.getByTestId('profiles-status')).toHaveText('Đã lưu hồ sơ.');
+		await expect(grid).toContainText('Na');
+		await grid.locator('li', { hasText: 'Na' }).getByRole('button', { name: 'Sửa' }).click();
+		await page.getByTestId('profile-archive').click();
+		const dialog = page.getByTestId('archive-dialog');
+		await expect(dialog).toBeVisible();
+		await expect(dialog).toContainText('Dữ liệu học vẫn được giữ nguyên');
+		await dialog.getByRole('button', { name: 'Ẩn hồ sơ' }).click();
+		await expect(page.getByTestId('profiles-status')).toHaveText('Đã ẩn hồ sơ. Dữ liệu vẫn được giữ.');
+		await expect(grid.getByRole('button', { name: 'Học với hồ sơ Na', exact: true })).toHaveCount(0);
+		const db = new Database(DB, { readonly: true });
+		try {
+			const row = db.prepare("select id, archived_at from profiles where name = 'Na'").get() as { id: number; archived_at: number | null };
+			expect(row.archived_at).not.toBeNull();
+			expect(db.prepare('select count(*) from cards where profile_id = ?').pluck().get(row.id)).toBeGreaterThan(0);
+		} finally {
+			db.close();
+		}
+	});
+
+	test('logged in without a profile, pages go to the picker and /api answers 409', async ({ page }) => {
+		await login(page, '/stats', null);
+		await expect(page).toHaveURL('/profiles?next=%2Fstats');
+		const status = await page.evaluate(async () => (await fetch('/api/session/start', { method: 'POST', body: '{}' })).status);
+		expect(status).toBe(409);
+		await page.getByRole('button', { name: 'Học với hồ sơ Hồ sơ 1', exact: true }).click();
+		await expect(page).toHaveURL('/stats');
+	});
+});

@@ -1,4 +1,4 @@
-import { asc, count, gt, gte, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gt, gte, sql } from 'drizzle-orm';
 import type { DbOrTx } from '../client.ts';
 import { llmCalls } from '../schema.ts';
 
@@ -73,8 +73,11 @@ export function llmCallsRepo(db: DbOrTx) {
 				.orderBy(asc(llmCalls.providerId), asc(llmCalls.model))
 				.all();
 		},
-		/** HTTP attempts and tokens per day (ICT) x purpose x model since `since`, oldest day first. */
-		usageByDay(since: Date): DailyUsage[] {
+		/**
+		 * HTTP attempts and tokens per day (ICT) x purpose x model since `since`, oldest day first;
+		 * with `profileId`, only the calls made for that learner (grading).
+		 */
+		usageByDay(since: Date, profileId?: number): DailyUsage[] {
 			const day = sql<string>`strftime('%Y-%m-%d', ${llmCalls.createdAt} / 1000 + 7 * 3600, 'unixepoch')`;
 			return db
 				.select({
@@ -86,7 +89,7 @@ export function llmCallsRepo(db: DbOrTx) {
 					outputTokens: sql<number>`coalesce(sum(${llmCalls.outputTokens}), 0)`
 				})
 				.from(llmCalls)
-				.where(gte(llmCalls.createdAt, since))
+				.where(and(gte(llmCalls.createdAt, since), profileId === undefined ? undefined : eq(llmCalls.profileId, profileId)))
 				.groupBy(day, llmCalls.purpose, llmCalls.model)
 				.orderBy(asc(day), asc(llmCalls.purpose), asc(llmCalls.model))
 				.all();

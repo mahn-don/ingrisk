@@ -89,6 +89,13 @@ export function minedOptions(error: Pick<WritingError, 'original' | 'topic_code'
 	return { options: seededShuffle([answer, ...chosen.map(cased)], `${seed}|order`), typingOnly: false };
 }
 
+/**
+ * content_hash is unique across the table, so a mined item's hash includes its owner: two learners
+ * making the same mistake each get their own item. Profile 1 keeps the pre-profile hash format, so
+ * its earlier mined items still count as duplicates.
+ */
+const ownerTag = (profileId: number) => (profileId === 1 ? '' : `p${profileId}|`);
+
 export interface MiningSource {
 	correctedText: string;
 	errors: readonly WritingError[];
@@ -106,7 +113,7 @@ export interface MiningResult {
  * Turn graded errors into user_error cloze items with a card each (state New, created now; exempt
  * from the daily new-card limit). An identical sentence and span already mined is skipped.
  */
-export function mineErrors(db: DbOrTx, source: MiningSource, now: Date, forms: FormIndex = buildFormIndex(lexemesRepo(db).all())): MiningResult {
+export function mineErrors(db: DbOrTx, profileId: number, source: MiningSource, now: Date, forms: FormIndex = buildFormIndex(lexemesRepo(db).all())): MiningResult {
 	const result: MiningResult = { created: 0, skipped: [] };
 	const clozeItems = clozeItemsRepo(db);
 	const topics = grammarTopicsRepo(db);
@@ -120,13 +127,14 @@ export function mineErrors(db: DbOrTx, source: MiningSource, now: Date, forms: F
 		const first = tokens[located.tokenIndex];
 		const last = tokens[located.tokenIndex + located.tokenCount - 1];
 		const answer = located.sentence.slice(first.start, last.end);
-		const contentHash = sha256(`user_error|${located.sentence.replace(/\s+/g, ' ').toLowerCase()}|${located.tokenIndex}|${located.tokenCount}`);
+		const contentHash = sha256(`user_error|${ownerTag(profileId)}${located.sentence.replace(/\s+/g, ' ').toLowerCase()}|${located.tokenIndex}|${located.tokenCount}`);
 		if (clozeItems.existingHashes([contentHash]).size > 0) {
 			result.skipped.push({ reason: 'duplicate', correction: error.correction });
 			continue;
 		}
 		const { options, typingOnly } = minedOptions(error, answer, located.tokenIndex === firstWordIndex(tokens), forms, contentHash);
 		const sentence = sentencesRepo(db).insert({
+			profileId,
 			enText: located.sentence,
 			viText: source.viText,
 			source: 'user_error',
@@ -136,6 +144,7 @@ export function mineErrors(db: DbOrTx, source: MiningSource, now: Date, forms: F
 		});
 		const topicId = topics.byCode(error.topic_code)?.id ?? null;
 		const item = clozeItems.insert({
+			profileId,
 			sentenceId: sentence.id,
 			gapType: 'user_error',
 			tokenIndex: located.tokenIndex,
@@ -156,7 +165,7 @@ export function mineErrors(db: DbOrTx, source: MiningSource, now: Date, forms: F
 			createdAt: now
 		});
 		if (item === undefined) continue;
-		cardsRepo(db).insertIfAbsent({
+		cardsRepo(db, profileId).insertIfAbsent({
 			kind: 'cloze',
 			lexemeId: null,
 			sentenceId: sentence.id,

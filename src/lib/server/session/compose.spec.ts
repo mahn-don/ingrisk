@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { TEST_PROFILE } from '../db/test-db.ts';
 import { cardsRepo } from '../db/repositories/cards.ts';
-import { settingsRepo } from '../db/repositories/settings.ts';
+import { learningSettingsRepo, settingsRepo } from '../db/repositories/settings.ts';
 import { arrange, capStockNames, composeSession, interleave, itemCount, newItemsWanted, promptMode } from './compose.ts';
 import { finishSession, startSession } from './engine.ts';
 import { DAY, MINUTE, T0, setup } from './test-fixtures.ts';
@@ -60,12 +61,12 @@ describe('composeSession', () => {
 	it('returns the item count for the budget and creates the new cards', () => {
 		const { db, addItem } = setup();
 		for (let i = 0; i < 40; i++) addItem({ gapType: (['lexical', 'article', 'preposition', 'verb_form'] as const)[i % 4] });
-		settingsRepo(db).update({ newCardsPerDay: 50 });
-		const session = composeSession(db, T0, { budgetMin: 5 });
+		learningSettingsRepo(db, TEST_PROFILE).update({ newCardsPerDay: 50 });
+		const session = composeSession(db, TEST_PROFILE, T0, { budgetMin: 5 });
 		expect(session.items).toHaveLength(15);
 		expect(session.created).toBe(15);
 		expect(session.items.every((i) => i.isNew && i.mode === 'choice')).toBe(true);
-		expect(cardsRepo(db).counts(T0).new).toBe(15);
+		expect(cardsRepo(db, TEST_PROFILE).counts(T0).new).toBe(15);
 		// About half lexical; the rest spread over the grammar types.
 		const lexical = session.items.filter((i) => i.gapType === 'lexical').length;
 		expect(lexical).toBeGreaterThanOrEqual(7);
@@ -76,7 +77,7 @@ describe('composeSession', () => {
 	it('fills an item for the client: gap, options, answer, translation and intervals', () => {
 		const { db, addItem } = setup();
 		addItem({ gapType: 'lexical' });
-		const [item] = composeSession(db, T0, { budgetMin: 5 }).items;
+		const [item] = composeSession(db, TEST_PROFILE, T0, { budgetMin: 5 }).items;
 		expect(item).toMatchObject({
 			mode: 'choice',
 			gapType: 'lexical',
@@ -97,24 +98,24 @@ describe('composeSession', () => {
 	it('respects the daily new-card limit across two sessions in one learning day', () => {
 		const { db, addItem } = setup();
 		for (let i = 0; i < 20; i++) addItem({ gapType: i % 2 === 0 ? 'lexical' : 'preposition' });
-		settingsRepo(db).update({ newCardsPerDay: 4 });
-		const first = startSession(db, T0, { budgetMin: 5 });
+		learningSettingsRepo(db, TEST_PROFILE).update({ newCardsPerDay: 4 });
+		const first = startSession(db, TEST_PROFILE, T0, { budgetMin: 5 });
 		expect(first.items.filter((i) => i.isNew)).toHaveLength(4);
 		// Abandoned (a new start): the same New cards come back, no more are created.
-		const again = startSession(db, new Date(T0.getTime() + MINUTE), { budgetMin: 5 });
+		const again = startSession(db, TEST_PROFILE, new Date(T0.getTime() + MINUTE), { budgetMin: 5 });
 		expect(again.items.map((i) => i.cardId).sort()).toEqual(first.items.map((i) => i.cardId).sort());
-		expect(cardsRepo(db).counts(T0).new).toBe(4);
-		finishSession(db, new Date(T0.getTime() + 2 * MINUTE), {
+		expect(cardsRepo(db, TEST_PROFILE).counts(T0).new).toBe(4);
+		finishSession(db, TEST_PROFILE, new Date(T0.getTime() + 2 * MINUTE), {
 			sessionId: again.sessionId!,
 			clientSessionId: 'c1',
 			results: again.items.map((i, k) => ({ cardId: i.cardId, correct: true, mode: i.mode, responseMs: 3000, hintUsed: false, answeredOffsetMs: 1000 * (k + 1) }))
 		});
 		// Later the same learning day: the learning cards are due again, but nothing new.
-		const later = startSession(db, new Date(T0.getTime() + 3 * 3_600_000), { budgetMin: 5 });
+		const later = startSession(db, TEST_PROFILE, new Date(T0.getTime() + 3 * 3_600_000), { budgetMin: 5 });
 		expect(later.items.length).toBeGreaterThan(0);
 		expect(later.items.filter((i) => i.isNew)).toEqual([]);
 		// The next learning day (04:00 ICT) allows new cards again.
-		const tomorrow = startSession(db, new Date(T0.getTime() + DAY), { budgetMin: 5 });
+		const tomorrow = startSession(db, TEST_PROFILE, new Date(T0.getTime() + DAY), { budgetMin: 5 });
 		expect(tomorrow.items.filter((i) => i.isNew).length).toBe(4);
 	});
 
@@ -123,7 +124,7 @@ describe('composeSession', () => {
 		const types = ['lexical', 'preposition', 'verb_form'] as const;
 		const due = [5, 1, 9, 2, 7, 3, 8, 4, 6].map((overdueDays, i) => ({ overdueDays, card: addDueCard({ overdueDays, gapType: types[i % 3] }) }));
 		for (let i = 0; i < 6; i++) addItem({ gapType: 'article' });
-		const { items } = composeSession(db, T0, { budgetMin: 5 });
+		const { items } = composeSession(db, TEST_PROFILE, T0, { budgetMin: 5 });
 		const byId = new Map(due.map((d) => [d.card.id, d.overdueDays]));
 		const reviews = items.filter((i) => !i.isNew).map((i) => byId.get(i.cardId));
 		expect(reviews.slice(0, 3).sort()).toEqual([1, 2, 3]);
@@ -138,8 +139,8 @@ describe('composeSession', () => {
 			addDueCard({ gapType: 'verb_form', sentenceId: first.sentenceId!, overdueDays: s + 1 });
 		}
 		for (let s = 0; s < 4; s++) addDueCard({ gapType: 'lexical', overdueDays: 20 + s });
-		const { items } = composeSession(db, T0, { budgetMin: 10 });
-		const sentence = new Map(cardsRepo(db).byIds(items.map((i) => i.cardId)).map((c) => [c.id, c.sentenceId]));
+		const { items } = composeSession(db, TEST_PROFILE, T0, { budgetMin: 10 });
+		const sentence = new Map(cardsRepo(db, TEST_PROFILE).byIds(items.map((i) => i.cardId)).map((c) => [c.id, c.sentenceId]));
 		expect(items).toHaveLength(16);
 		for (let i = 1; i < items.length; i++) expect(sentence.get(items[i].cardId)).not.toBe(sentence.get(items[i - 1].cardId));
 		for (let i = 3; i < items.length; i++) expect(new Set(items.slice(i - 3, i + 1).map((x) => x.gapType)).size).toBeGreaterThan(1);
@@ -149,8 +150,8 @@ describe('composeSession', () => {
 		const { db, addDueCard, addItem } = setup();
 		for (let i = 0; i < 10; i++) addDueCard({ stock: true, gapType: i % 2 ? 'lexical' : 'preposition', overdueDays: i + 1 });
 		for (let i = 0; i < 30; i++) addItem({ gapType: i % 2 ? 'lexical' : 'verb_form', stock: i < 10 });
-		settingsRepo(db).update({ newCardsPerDay: 50 });
-		const { items } = composeSession(db, T0, { budgetMin: 5 });
+		learningSettingsRepo(db, TEST_PROFILE).update({ newCardsPerDay: 50 });
+		const { items } = composeSession(db, TEST_PROFILE, T0, { budgetMin: 5 });
 		const stock = items.filter((i) => i.before.startsWith('Tom') || i.sentenceWithGap.startsWith('Tom'));
 		expect(items).toHaveLength(15);
 		expect(stock.length).toBeLessThanOrEqual(4);
@@ -161,22 +162,22 @@ describe('composeSession', () => {
 		const strong = addDueCard({ gapType: 'lexical', stability: 20 });
 		const article = addDueCard({ gapType: 'article', stability: 20 });
 		const weak = addDueCard({ gapType: 'preposition', stability: 2 });
-		const { items } = composeSession(db, T0, { budgetMin: 5 });
+		const { items } = composeSession(db, TEST_PROFILE, T0, { budgetMin: 5 });
 		const mode = new Map(items.map((i) => [i.cardId, i]));
 		expect(mode.get(strong.id)).toMatchObject({ mode: 'typing' });
 		expect(mode.get(strong.id)?.options).toBeUndefined();
 		expect(mode.get(article.id)?.mode).toBe('choice');
 		expect(mode.get(weak.id)?.mode).toBe('choice');
-		expect(cardsRepo(db).byId(strong.id)?.promptMode).toBe('typing');
+		expect(cardsRepo(db, TEST_PROFILE).byId(strong.id)?.promptMode).toBe('typing');
 	});
 
 	it('says why a session is empty', () => {
 		const empty = setup();
-		expect(composeSession(empty.db, T0, { budgetMin: 5 })).toEqual({ items: [], created: 0, reason: 'no_content' });
+		expect(composeSession(empty.db, TEST_PROFILE, T0, { budgetMin: 5 })).toEqual({ items: [], created: 0, reason: 'no_content' });
 		const done = setup();
 		done.addItem();
-		settingsRepo(done.db).update({ newCardsPerDay: 0 });
-		expect(composeSession(done.db, T0, { budgetMin: 5 })).toMatchObject({ items: [], reason: 'all_done' });
+		learningSettingsRepo(done.db, TEST_PROFILE).update({ newCardsPerDay: 0 });
+		expect(composeSession(done.db, TEST_PROFILE, T0, { budgetMin: 5 })).toMatchObject({ items: [], reason: 'all_done' });
 	});
 });
 
@@ -187,9 +188,9 @@ describe('homeCounts', () => {
 		for (let i = 0; i < 6; i++) addItem({ band: 1 });
 		addItem({ band: 5 }); // above known_band_ceiling + 1
 		addDueCard();
-		settingsRepo(db).update({ newCardsPerDay: 4 });
-		expect(homeCounts(db, T0)).toEqual({ due: 1, newAvailableToday: 4, learning: 0 });
-		settingsRepo(db).update({ newCardsPerDay: 50 });
-		expect(homeCounts(db, T0).newAvailableToday).toBe(6);
+		learningSettingsRepo(db, TEST_PROFILE).update({ newCardsPerDay: 4 });
+		expect(homeCounts(db, TEST_PROFILE, T0)).toEqual({ due: 1, newAvailableToday: 4, learning: 0 });
+		learningSettingsRepo(db, TEST_PROFILE).update({ newCardsPerDay: 50 });
+		expect(homeCounts(db, TEST_PROFILE, T0).newAvailableToday).toBe(6);
 	});
 });

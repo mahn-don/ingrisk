@@ -10,7 +10,7 @@ import { clozeItemsRepo } from '../db/repositories/cloze-items.ts';
 import { grammarTopicsRepo } from '../db/repositories/grammar-topics.ts';
 import { sentencesRepo } from '../db/repositories/sentences.ts';
 import { lexemes } from '../db/schema.ts';
-import { createTestDb } from '../db/test-db.ts';
+import { TEST_PROFILE, createTestDb } from '../db/test-db.ts';
 import { newCardFields } from '../srs/mapping.ts';
 import type { GapType } from '../../session/types.ts';
 
@@ -83,10 +83,10 @@ export function setup() {
 		})!;
 	};
 	/** A card on an item, already introduced: due `overdueDays` ago, with this stability. */
-	const addDueCard = (spec: ItemSpec & { overdueDays?: number; stability?: number; state?: CardRow['state']; now?: Date } = {}): CardRow => {
+	const addDueCard = (spec: ItemSpec & { overdueDays?: number; stability?: number; state?: CardRow['state']; now?: Date; profileId?: number } = {}): CardRow => {
 		const item = addItem(spec);
 		const now = spec.now ?? T0;
-		const card = cardsRepo(db).insertIfAbsent({
+		const card = cardsRepo(db, spec.profileId ?? TEST_PROFILE).insertIfAbsent({
 			kind: 'cloze',
 			lexemeId: item.lexemeId,
 			sentenceId: item.sentenceId,

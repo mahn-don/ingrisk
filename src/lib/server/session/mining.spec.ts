@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { TEST_PROFILE } from '../db/test-db.ts';
 import { cardsRepo } from '../db/repositories/cards.ts';
-import { clozeItemsRepo } from '../db/repositories/cloze-items.ts';
-import { settingsRepo } from '../db/repositories/settings.ts';
+import { learnerClozeRepo } from '../db/repositories/cloze-items.ts';
+import { learningSettingsRepo, settingsRepo } from '../db/repositories/settings.ts';
 import { sentencesRepo } from '../db/repositories/sentences.ts';
 import { buildFormIndex } from '../generation/forms.ts';
 import { composeSession } from './compose.ts';
@@ -68,20 +69,23 @@ describe('mineErrors', () => {
 
 	it('makes a user_error item, its own sentence row and a New card per located error', () => {
 		const { db } = setup();
-		const result = mineErrors(db, source, T0, forms);
+		const result = mineErrors(db, TEST_PROFILE, source, T0, forms);
 		expect(result.created).toBe(2);
 		expect(result.skipped).toEqual([{ reason: 'missing', correction: 'make a mistake' }]);
-		const items = clozeItemsRepo(db).byValidated(true).filter((i) => i.gapType === 'user_error');
-		expect(items.map((i) => [i.answer, i.tokenIndex, i.tokenCount, i.promptVersion, i.ruleOk, i.criticOk])).toEqual([
-			['went', 2, 1, 'user_error', true, null],
-			['bought', 1, 1, 'user_error', true, null]
+		// Mined items and their sentences belong to the learner (Phase 12): the shared pool never sees them.
+		const learner = learnerClozeRepo(db, TEST_PROFILE);
+		const items = [learner.byId(1)!, learner.byId(2)!];
+		expect(items.map((i) => [i.answer, i.tokenIndex, i.tokenCount, i.promptVersion, i.ruleOk, i.criticOk, i.profileId])).toEqual([
+			['went', 2, 1, 'user_error', true, null, TEST_PROFILE],
+			['bought', 1, 1, 'user_error', true, null, TEST_PROFILE]
 		]);
-		expect(items[0]).toMatchObject({ enText: 'Yesterday I went to the market with my mother.', viText: 'Hôm qua bạn đã làm gì?', levelBand: 2 });
-		const sentence = sentencesRepo(db).byId(items[0].sentenceId)!;
-		expect(sentence).toMatchObject({ source: 'user_error', levelBand: 2 });
+		expect(learner.forSession([1])[0]).toMatchObject({ enText: 'Yesterday I went to the market with my mother.', viText: 'Hôm qua bạn đã làm gì?', levelBand: 2 });
+		expect(sentencesRepo(db).byId(items[0].sentenceId)).toBeUndefined();
+		const sentence = db.$client.prepare('select source, level_band, profile_id from sentences where id = ?').get(items[0].sentenceId);
+		expect(sentence).toEqual({ source: 'user_error', level_band: 2, profile_id: TEST_PROFILE });
 		// "bought": buy's forms are not in this form index, so it is typed.
 		expect(items[1]).toMatchObject({ typingOnly: true, options: [] });
-		const cards = cardsRepo(db).byIds([1, 2]);
+		const cards = cardsRepo(db, TEST_PROFILE).byIds([1, 2]);
 		expect(cards.map((c) => [c.state, c.clozeItemId, c.promptMode])).toEqual([
 			['New', items[0].id, 'choice'],
 			['New', items[1].id, 'typing']
@@ -90,8 +94,8 @@ describe('mineErrors', () => {
 
 	it('skips an identical sentence and span mined before', () => {
 		const { db } = setup();
-		expect(mineErrors(db, source, T0, forms).created).toBe(2);
-		const again = mineErrors(db, source, T0, forms);
+		expect(mineErrors(db, TEST_PROFILE, source, T0, forms).created).toBe(2);
+		const again = mineErrors(db, TEST_PROFILE, source, T0, forms);
 		expect(again.created).toBe(0);
 		expect(again.skipped.filter((s) => s.reason === 'duplicate')).toHaveLength(2);
 	});
@@ -99,9 +103,9 @@ describe('mineErrors', () => {
 	it('mined cards are exempt from the daily new-card limit and come in the next session', () => {
 		const { db, addItem } = setup();
 		for (let i = 0; i < 6; i++) addItem();
-		settingsRepo(db).update({ newCardsPerDay: 2 });
-		mineErrors(db, source, T0, forms);
-		const first = startSession(db, T0, { budgetMin: 5 });
+		learningSettingsRepo(db, TEST_PROFILE).update({ newCardsPerDay: 2 });
+		mineErrors(db, TEST_PROFILE, source, T0, forms);
+		const first = startSession(db, TEST_PROFILE, T0, { budgetMin: 5 });
 		const mined = first.items.filter((i) => i.isMined);
 		expect(mined).toHaveLength(2);
 		expect(mined.every((i) => i.isNew && i.gapType === 'user_error')).toBe(true);
@@ -111,15 +115,15 @@ describe('mineErrors', () => {
 		expect(typed).toMatchObject({ mode: 'typing', viTranslation: 'Hôm qua bạn đã làm gì?', before: 'We ', after: ' fish.' });
 		expect(typed.options).toBeUndefined();
 		// Answering everything introduces 4 cards, but only the 2 regular ones count: nothing new left today.
-		finishSession(db, new Date(T0.getTime() + MINUTE), {
+		finishSession(db, TEST_PROFILE, new Date(T0.getTime() + MINUTE), {
 			sessionId: first.sessionId!,
 			clientSessionId: 'c1',
 			results: first.items.map((i, k) => ({ cardId: i.cardId, correct: true, mode: i.mode, responseMs: 3000, hintUsed: false, answeredOffsetMs: 1000 * (k + 1) }))
 		});
-		mineErrors(db, { ...source, correctedText: 'The children went home.', errors: [error('childs', 'children', 'PLU')] }, new Date(T0.getTime() + 2 * MINUTE), forms);
-		const later = composeSession(db, new Date(T0.getTime() + 3 * 3_600_000), { budgetMin: 5 });
+		mineErrors(db, TEST_PROFILE, { ...source, correctedText: 'The children went home.', errors: [error('childs', 'children', 'PLU')] }, new Date(T0.getTime() + 2 * MINUTE), forms);
+		const later = composeSession(db, TEST_PROFILE, new Date(T0.getTime() + 3 * 3_600_000), { budgetMin: 5 });
 		expect(later.items.filter((i) => i.isNew).map((i) => i.isMined)).toEqual([true]);
-		const tomorrow = composeSession(db, new Date(T0.getTime() + DAY), { budgetMin: 5 });
+		const tomorrow = composeSession(db, TEST_PROFILE, new Date(T0.getTime() + DAY), { budgetMin: 5 });
 		expect(tomorrow.items.filter((i) => i.isNew && !i.isMined).length).toBe(2);
 	});
 });

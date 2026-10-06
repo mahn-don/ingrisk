@@ -1,8 +1,9 @@
 import { type Grade, Rating } from 'ts-fsrs';
+import { TEST_PROFILE } from '../db/test-db.ts';
 import { describe, expect, it } from 'vitest';
 import { cardsRepo } from '../db/repositories/cards.ts';
 import { reviewLogsRepo } from '../db/repositories/review-logs.ts';
-import { settingsRepo } from '../db/repositories/settings.ts';
+import { learningSettingsRepo, settingsRepo } from '../db/repositories/settings.ts';
 import { CardNotFoundError, InvalidRatingError, ReviewTimeError } from './errors.ts';
 import { review, reviewBatch } from './review.ts';
 import { DAY, MINUTE, NO_FUZZ, T0, addNewCard, setupDb } from './test-helpers.ts';
@@ -10,9 +11,9 @@ import type { Db } from '../db/client.ts';
 
 /** Review at each due time; returns the interval (due - review time, ms) after every step. */
 function runAtDueTimes(db: Db, cardId: number, ratings: Grade[]) {
-	let at = cardsRepo(db).byId(cardId)!.due;
+	let at = cardsRepo(db, TEST_PROFILE).byId(cardId)!.due;
 	return ratings.map((rating) => {
-		const { card, log } = review(db, cardId, rating, at, at, NO_FUZZ);
+		const { card, log } = review(db, TEST_PROFILE, cardId, rating, at, at, NO_FUZZ);
 		const interval = card.due.getTime() - at.getTime();
 		at = card.due;
 		return { card, log, interval };
@@ -54,7 +55,7 @@ describe('retention setting', () => {
 	it('a lower desired retention gives a longer next interval for the same history', () => {
 		const intervalWith = (retention: number) => {
 			const db = setupDb();
-			settingsRepo(db).update({ desiredRetention: retention });
+			learningSettingsRepo(db, TEST_PROFILE).update({ desiredRetention: retention });
 			const id = addNewCard(db).id;
 			return runAtDueTimes(db, id, [Rating.Good, Rating.Good, Rating.Good, Rating.Good]).at(-1)!.interval;
 		};
@@ -66,10 +67,10 @@ describe('persistence', () => {
 	it('writes exactly one log with the stability and difficulty before and after', () => {
 		const db = setupDb();
 		const id = addNewCard(db).id;
-		const first = review(db, id, Rating.Good, T0, T0, NO_FUZZ);
+		const first = review(db, TEST_PROFILE, id, Rating.Good, T0, T0, NO_FUZZ);
 		const at = first.card.due;
-		const { card, log } = review(db, id, Rating.Good, at, at, NO_FUZZ);
-		const logs = reviewLogsRepo(db).forCard(id);
+		const { card, log } = review(db, TEST_PROFILE, id, Rating.Good, at, at, NO_FUZZ);
+		const logs = reviewLogsRepo(db, TEST_PROFILE).forCard(id);
 		expect(logs).toHaveLength(2);
 		expect(logs[1]).toEqual(log);
 		expect(log).toMatchObject({
@@ -82,7 +83,7 @@ describe('persistence', () => {
 			newS: card.stability,
 			newD: card.difficulty
 		});
-		expect(cardsRepo(db).byId(id)).toEqual(card);
+		expect(cardsRepo(db, TEST_PROFILE).byId(id)).toEqual(card);
 	});
 
 	it('rolls back the whole batch when one review fails', () => {
@@ -92,6 +93,7 @@ describe('persistence', () => {
 		expect(() =>
 			reviewBatch(
 				db,
+				TEST_PROFILE,
 				[
 					{ cardId: a, rating: Rating.Good, reviewedAt: T0 },
 					{ cardId: b, rating: Rating.Good, reviewedAt: new Date(T0.getTime() + MINUTE) },
@@ -101,9 +103,9 @@ describe('persistence', () => {
 				NO_FUZZ
 			)
 		).toThrow(CardNotFoundError);
-		expect(reviewLogsRepo(db).forCard(a)).toEqual([]);
-		expect(reviewLogsRepo(db).forCard(b)).toEqual([]);
-		expect(cardsRepo(db).byId(a)?.state).toBe('New');
+		expect(reviewLogsRepo(db, TEST_PROFILE).forCard(a)).toEqual([]);
+		expect(reviewLogsRepo(db, TEST_PROFILE).forCard(b)).toEqual([]);
+		expect(cardsRepo(db, TEST_PROFILE).byId(a)?.state).toBe('New');
 	});
 
 	it('applies out-of-order input in chronological order', () => {
@@ -115,6 +117,7 @@ describe('persistence', () => {
 		// Applied as given, t3 then t1 would fail the "before last review" check.
 		const results = reviewBatch(
 			db,
+			TEST_PROFILE,
 			[
 				{ cardId: id, rating: Rating.Good, reviewedAt: t3 },
 				{ cardId: id, rating: Rating.Good, reviewedAt: t1 },
@@ -124,7 +127,7 @@ describe('persistence', () => {
 			NO_FUZZ
 		);
 		expect(results.map((r) => r.log.review)).toEqual([t1, t2, t3]);
-		expect(reviewLogsRepo(db).forCard(id).map((l) => l.rating)).toEqual(['Good', 'Again', 'Good']);
+		expect(reviewLogsRepo(db, TEST_PROFILE).forCard(id).map((l) => l.rating)).toEqual(['Good', 'Again', 'Good']);
 	});
 
 	it('works inside a caller transaction and rolls back with it', () => {
@@ -132,11 +135,11 @@ describe('persistence', () => {
 		const id = addNewCard(db).id;
 		expect(() =>
 			db.transaction((tx) => {
-				review(tx, id, Rating.Good, T0, T0, NO_FUZZ);
+				review(tx, TEST_PROFILE, id, Rating.Good, T0, T0, NO_FUZZ);
 				throw new Error('session write failed');
 			})
 		).toThrow('session write failed');
-		expect(reviewLogsRepo(db).forCard(id)).toEqual([]);
+		expect(reviewLogsRepo(db, TEST_PROFILE).forCard(id)).toEqual([]);
 	});
 });
 
@@ -144,34 +147,34 @@ describe('timestamps and input checks', () => {
 	it('rejects a review earlier than the last review', () => {
 		const db = setupDb();
 		const id = addNewCard(db).id;
-		review(db, id, Rating.Good, T0, T0, NO_FUZZ);
+		review(db, TEST_PROFILE, id, Rating.Good, T0, T0, NO_FUZZ);
 		const earlier = new Date(T0.getTime() - 1);
 		const error = (() => {
 			try {
-				review(db, id, Rating.Good, earlier, T0, NO_FUZZ);
+				review(db, TEST_PROFILE, id, Rating.Good, earlier, T0, NO_FUZZ);
 			} catch (e) {
 				return e;
 			}
 		})();
 		expect(error).toBeInstanceOf(ReviewTimeError);
 		expect(error).toMatchObject({ problem: 'before_last_review', code: 'review_before_last_review' });
-		expect(reviewLogsRepo(db).forCard(id)).toHaveLength(1);
+		expect(reviewLogsRepo(db, TEST_PROFILE).forCard(id)).toHaveLength(1);
 	});
 
 	it('rejects a review more than 5 minutes in the future, accepts exactly 5', () => {
 		const db = setupDb();
 		const id = addNewCard(db).id;
 		const tooLate = new Date(T0.getTime() + 5 * MINUTE + 1);
-		expect(() => review(db, id, Rating.Good, tooLate, T0, NO_FUZZ)).toThrow(
+		expect(() => review(db, TEST_PROFILE, id, Rating.Good, tooLate, T0, NO_FUZZ)).toThrow(
 			expect.objectContaining({ problem: 'in_future' })
 		);
-		expect(review(db, id, Rating.Good, new Date(T0.getTime() + 5 * MINUTE), T0, NO_FUZZ).log).toBeDefined();
+		expect(review(db, TEST_PROFILE, id, Rating.Good, new Date(T0.getTime() + 5 * MINUTE), T0, NO_FUZZ).log).toBeDefined();
 	});
 
 	it('rejects a missing card and a Manual rating with typed errors', () => {
 		const db = setupDb();
 		const id = addNewCard(db).id;
-		expect(() => review(db, 12345, Rating.Good, T0, T0)).toThrow(CardNotFoundError);
-		expect(() => review(db, id, Rating.Manual as unknown as Grade, T0, T0)).toThrow(InvalidRatingError);
+		expect(() => review(db, TEST_PROFILE, 12345, Rating.Good, T0, T0)).toThrow(CardNotFoundError);
+		expect(() => review(db, TEST_PROFILE, id, Rating.Manual as unknown as Grade, T0, T0)).toThrow(InvalidRatingError);
 	});
 });

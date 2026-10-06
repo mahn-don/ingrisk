@@ -4,7 +4,7 @@ import type { DbOrTx } from '../db/client.ts';
 import { cardsRepo } from '../db/repositories/cards.ts';
 import { type BookCard, reviewBookRepo } from '../db/repositories/review-book.ts';
 import { reviewLogsRepo } from '../db/repositories/review-logs.ts';
-import { settingsRepo } from '../db/repositories/settings.ts';
+import { learningSettingsRepo } from '../db/repositories/settings.ts';
 import { tokenize, withGap } from '../generation/tokens.ts';
 import { dayIndex } from '../progress/days.ts';
 import { byHardness, retrievabilityOf } from '../session/focus.ts';
@@ -56,26 +56,26 @@ function toRow(row: BookCard, now: Date): BookRow {
 }
 
 /** "Hay sai": cards with lapses and every mined error, most lapses first, then the weakest. */
-export function hardList(db: DbOrTx, now: Date): BookRow[] {
-	const scheduler = createScheduler(settingsRepo(db).get());
-	return byHardness(reviewBookRepo(db).oftenWrong(), (card) => retrievabilityOf(scheduler, card, now))
+export function hardList(db: DbOrTx, profileId: number, now: Date): BookRow[] {
+	const scheduler = createScheduler(learningSettingsRepo(db, profileId).get());
+	return byHardness(reviewBookRepo(db, profileId).oftenWrong(), (card) => retrievabilityOf(scheduler, card, now))
 		.slice(0, HARD_LIMIT)
 		.map((r) => toRow(r, now));
 }
 
 /** "Đã học": every introduced card, soonest due first, matching `query` when given. */
-export function learnedList(db: DbOrTx, now: Date, query: string): BookRow[] {
-	return reviewBookRepo(db)
+export function learnedList(db: DbOrTx, profileId: number, now: Date, query: string): BookRow[] {
+	return reviewBookRepo(db, profileId)
 		.learned(query.slice(0, 100), LEARNED_LIMIT)
 		.map((r) => toRow(r, now));
 }
 
 const SOURCES = new Set(['tatoeba', 'user', 'llm']);
 
-export function cardDetail(db: DbOrTx, now: Date, cardId: number): BookDetail | null {
-	const row = reviewBookRepo(db).byCardId(cardId);
+export function cardDetail(db: DbOrTx, profileId: number, now: Date, cardId: number): BookDetail | null {
+	const row = reviewBookRepo(db, profileId).byCardId(cardId);
 	if (row === undefined) return null;
-	const logs = reviewLogsRepo(db).forCard(cardId);
+	const logs = reviewLogsRepo(db, profileId).forCard(cardId);
 	const { before, after } = gapParts(row);
 	return {
 		...toRow(row, now),
@@ -96,13 +96,13 @@ export function cardDetail(db: DbOrTx, now: Date, cardId: number): BookDetail | 
 }
 
 /** "Ôn ngay": the card is due now (and shown again if it was hidden). */
-export function reviewNow(db: DbOrTx, now: Date, cardId: number): boolean {
-	const cards = cardsRepo(db);
+export function reviewNow(db: DbOrTx, profileId: number, now: Date, cardId: number): boolean {
+	const cards = cardsRepo(db, profileId);
 	if (!cards.dueNow(cardId, now)) return false;
 	cards.setSuspended(cardId, false);
 	return true;
 }
 
-export function setSuspended(db: DbOrTx, cardId: number, suspended: boolean): boolean {
-	return cardsRepo(db).setSuspended(cardId, suspended);
+export function setSuspended(db: DbOrTx, profileId: number, cardId: number, suspended: boolean): boolean {
+	return cardsRepo(db, profileId).setSuspended(cardId, suspended);
 }

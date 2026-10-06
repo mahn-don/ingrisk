@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { NewCard } from './cards.ts';
-import { createRepositories } from './index.ts';
-import { createTestDb } from '../test-db.ts';
+import { createRepositories, learnerRepositories } from './index.ts';
+import { TEST_PROFILE, createTestDb } from '../test-db.ts';
 
 const T0 = new Date(1_800_000_000_000);
 const at = (minutes: number) => new Date(T0.getTime() + minutes * 60_000);
 
 function setup() {
-	return createRepositories(createTestDb());
+	const db = createTestDb();
+	const learner = learnerRepositories(db, TEST_PROFILE);
+	return { ...createRepositories(db), ...learner, clozeItems: createRepositories(db).clozeItems, learnerCloze: learner.clozeItems };
 }
 
 const card = (overrides: Partial<NewCard> = {}): NewCard => ({
@@ -24,12 +26,12 @@ const card = (overrides: Partial<NewCard> = {}): NewCard => ({
 	...overrides
 });
 
-describe('settings', () => {
-	it('reads the seeded row and applies a patch', () => {
-		const { settings } = setup();
+describe('learning settings', () => {
+	it('reads the profile\'s row and applies a patch', () => {
+		const { learningSettings: settings } = setup();
 		expect(settings.get().desiredRetention).toBe(0.9);
 		expect(settings.update({ desiredRetention: 0.85, weeklyGoalDays: 4 })).toMatchObject({
-			id: 1,
+			profileId: TEST_PROFILE,
 			desiredRetention: 0.85,
 			weeklyGoalDays: 4,
 			feedbackMode: 'direct'

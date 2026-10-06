@@ -4,9 +4,9 @@
 import type { FSRS } from 'ts-fsrs';
 import type { DbOrTx } from '../db/client.ts';
 import { type CardRow, cardsRepo } from '../db/repositories/cards.ts';
-import { type SessionClozeItem, clozeItemsRepo } from '../db/repositories/cloze-items.ts';
+import { type SessionClozeItem, clozeItemsRepo, learnerClozeRepo } from '../db/repositories/cloze-items.ts';
 import { profileRepo } from '../db/repositories/profile.ts';
-import { settingsRepo } from '../db/repositories/settings.ts';
+import { learningSettingsRepo } from '../db/repositories/settings.ts';
 import { hashString } from '../generation/random.ts';
 import { fillGap, tokenize, withGap } from '../generation/tokens.ts';
 import { buildQueue, createScheduler, learningDayStart, newCardFields, previewIntervals, toFsrsCard } from '../srs/index.ts';
@@ -211,13 +211,13 @@ export function toItem(card: CardRow, item: SessionClozeItem, now: Date, schedul
  * first) with new cards interleaved, within the daily new-card limit and the stock-name cap. New
  * cards are created here (state New); an abandoned session simply leaves them New.
  */
-export function composeSession(db: DbOrTx, now: Date, options: { budgetMin: number; shape?: SessionShape }): ComposedSession {
+export function composeSession(db: DbOrTx, profileId: number, now: Date, options: { budgetMin: number; shape?: SessionShape }): ComposedSession {
 	const count = itemCount(options.budgetMin, options.shape);
-	const settings = settingsRepo(db).get();
+	const settings = learningSettingsRepo(db, profileId).get();
 	const scheduler = createScheduler(settings);
-	const cards = cardsRepo(db);
-	const clozeItems = clozeItemsRepo(db);
-	const queue = buildQueue(db, now, { reviewLimit: count, newLimit: settings.newCardsPerDay });
+	const cards = cardsRepo(db, profileId);
+	const clozeItems = learnerClozeRepo(db, profileId);
+	const queue = buildQueue(db, profileId, now, { reviewLimit: count, newLimit: settings.newCardsPerDay });
 
 	// 9a serves cloze cards only (other kinds come with Phase 9b).
 	const cloze = queue.cards.filter((c) => c.kind === 'cloze' && c.clozeItemId !== null);
@@ -251,7 +251,7 @@ export function composeSession(db: DbOrTx, now: Date, options: { budgetMin: numb
 	// (their cards are created below). Extra fresh candidates cover the cap and card conflicts.
 	const left = Math.max(0, settings.newCardsPerDay - queue.introducedToday);
 	const wanted = newItemsWanted(keptReviews.length, left, count);
-	const fresh = pickNewItems(clozeItems.newCardCandidates(profileRepo(db).get().knownBandCeiling + 1), Math.max(0, wanted - existingNew.length) * 2 + 5, {
+	const fresh = pickNewItems(clozeItems.newCardCandidates(profileRepo(db, profileId).get().knownBandCeiling + 1), Math.max(0, wanted - existingNew.length) * 2 + 5, {
 		lexemesWithCards: cards.lexemeIdsWithCards(),
 		avoidSentences: new Set([...keptReviews, ...existingNew].map((e) => e.sentenceId)),
 		seed: String(learningDayStart(now).getTime())
@@ -287,6 +287,6 @@ export function composeSession(db: DbOrTx, now: Date, options: { budgetMin: numb
 		items.push(toItem(card, e.item, now, scheduler));
 	}
 	if (items.length > 0) return { items, created };
-	const hasContent = due.length > 0 || existingNew.length > 0 || clozeItems.hasValidated();
+	const hasContent = due.length > 0 || existingNew.length > 0 || clozeItemsRepo(db).hasValidated();
 	return { items, created, reason: hasContent ? 'all_done' : 'no_content' };
 }

@@ -3,7 +3,7 @@ import { type Grade, Rating } from 'ts-fsrs';
 import type { DbOrTx } from '../db/client.ts';
 import { cardsRepo, type CardRow } from '../db/repositories/cards.ts';
 import { reviewLogsRepo, type ReviewLogRow } from '../db/repositories/review-logs.ts';
-import { settingsRepo } from '../db/repositories/settings.ts';
+import { learningSettingsRepo } from '../db/repositories/settings.ts';
 import { CardNotFoundError, InvalidRatingError, ReviewTimeError } from './errors.ts';
 import { fromFsrsCard, fromFsrsReviewLog, toFsrsCard } from './mapping.ts';
 import { createScheduler, type SchedulerOptions } from './scheduler.ts';
@@ -35,6 +35,7 @@ function assertGrade(rating: unknown): asserts rating is Grade {
  */
 export function review(
 	dbOrTx: DbOrTx,
+	profileId: number,
 	cardId: number,
 	rating: Grade,
 	reviewedAt: Date,
@@ -43,7 +44,7 @@ export function review(
 ): ReviewResult {
 	assertGrade(rating);
 	return dbOrTx.transaction((tx) => {
-		const cards = cardsRepo(tx);
+		const cards = cardsRepo(tx, profileId);
 		const row = cards.byId(cardId);
 		if (row === undefined) throw new CardNotFoundError(cardId);
 		if (row.lastReview !== null && reviewedAt.getTime() < row.lastReview.getTime()) {
@@ -54,11 +55,11 @@ export function review(
 			throw new ReviewTimeError('in_future', cardId, reviewedAt, latest);
 		}
 
-		const scheduler = createScheduler(settingsRepo(tx).get(), options);
+		const scheduler = createScheduler(learningSettingsRepo(tx, profileId).get(), options);
 		// ts-fsrs's log records the card as it was before this review.
 		const next = scheduler.next(toFsrsCard(row), reviewedAt, rating);
 		const card = cards.save(fromFsrsCard(next.card, row));
-		const log = reviewLogsRepo(tx).append(
+		const log = reviewLogsRepo(tx, profileId).append(
 			fromFsrsReviewLog(next.log, {
 				cardId,
 				oldS: row.stability,
@@ -77,12 +78,13 @@ export function review(
  */
 export function reviewBatch(
 	dbOrTx: DbOrTx,
+	profileId: number,
 	reviews: readonly ReviewInput[],
 	serverNow: Date,
 	options: SchedulerOptions = {}
 ): ReviewResult[] {
 	const ordered = [...reviews].sort((a, b) => a.reviewedAt.getTime() - b.reviewedAt.getTime());
 	return dbOrTx.transaction((tx) =>
-		ordered.map((r) => review(tx, r.cardId, r.rating, r.reviewedAt, serverNow, options))
+		ordered.map((r) => review(tx, profileId, r.cardId, r.rating, r.reviewedAt, serverNow, options))
 	);
 }
