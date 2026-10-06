@@ -17,10 +17,11 @@ export interface Session {
 	expiresAt: Date;
 }
 
-/** Start a session: returns the cookie token (never stored) and its expiry. */
+/** Start a session (a successful login; expired sessions are deleted): returns the cookie token (never stored) and its expiry. */
 export function createSession(db: DbOrTx, now: Date): { token: string; expiresAt: Date } {
 	const token = randomBytes(32).toString('base64url');
 	const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
+	authSessionsRepo(db).deleteExpired(now);
 	authSessionsRepo(db).insert({ id: hashToken(token), createdAt: now, expiresAt, lastSeenAt: now });
 	return { token, expiresAt };
 }

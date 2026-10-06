@@ -399,7 +399,9 @@ export const cards = sqliteTable(
 		reps: integer('reps').notNull(),
 		lapses: integer('lapses').notNull(),
 		state: text('state', { enum: FSRS_STATES }).notNull(),
-		lastReview: integer('last_review', { mode: 'timestamp_ms' })
+		lastReview: integer('last_review', { mode: 'timestamp_ms' }),
+		/** Hidden by the learner (review book): out of every queue and count, history kept (0009). */
+		suspended: integer('suspended', { mode: 'boolean' }).notNull().default(false)
 	},
 	(t) => [
 		// SQLite treats NULLs as distinct in unique indexes, so the nullable references are

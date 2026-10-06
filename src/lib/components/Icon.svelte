@@ -4,7 +4,7 @@
 	<Icon name="check" />  <Icon name="alert" label={t.states.errorTitle} />
 -->
 <script lang="ts" module>
-	export type IconName = 'home' | 'chart' | 'settings' | 'close' | 'check' | 'cross' | 'dot' | 'alert' | 'inbox' | 'arrow';
+	export type IconName = 'home' | 'chart' | 'settings' | 'close' | 'check' | 'cross' | 'dot' | 'alert' | 'inbox' | 'arrow' | 'book';
 
 	const PATHS: Record<IconName, string> = {
 		home: 'M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1z',
@@ -16,7 +16,8 @@
 		dot: 'M12 12m-4 0a4 4 0 1 0 8 0 4 4 0 1 0-8 0',
 		alert: 'M12 4 2.8 19.5h18.4zM12 10v4.5M12 17.2v.3',
 		inbox: 'M3.5 13.5 6 5h12l2.5 8.5V19a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1zM3.5 13.5H9l1 2h4l1-2h5.5',
-		arrow: 'M5 12h14M13 6l6 6-6 6'
+		arrow: 'M5 12h14M13 6l6 6-6 6',
+		book: 'M12 6.5C10.5 5 8 4.5 4 4.5v14c4 0 6.5.5 8 2 1.5-1.5 4-2 8-2v-14c-4 0-6.5.5-8 2zM12 6.5v14'
 	};
 </script>
 

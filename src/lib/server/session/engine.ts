@@ -20,8 +20,9 @@ import { type ReviewInput, ReviewTimeError, learningDayStart, newCardFields, rat
 import type { AnchorOutcome, AnchorResponse, FinishRequest, FinishSummary, SessionShape, StartResponse } from '../../session/types.ts';
 import { readingAnchor, writeAnchor } from './anchors.ts';
 import { composeSession } from './compose.ts';
-import { takeDrills } from './drills.ts';
+import { takeDrills, takeTopicDrills } from './drills.ts';
 import { feedbackCard, unseenFeedbackCards } from './feedback.ts';
+import { type Focus, composeFocus } from './focus.ts';
 import { resolveShape, shapeContext } from './shape.ts';
 
 /** Offsets may run this far past the server's own elapsed time (network, clocks). */
@@ -47,21 +48,26 @@ export class SessionError extends Error {
  * Start a session: abandon the one in progress (its answers are lost), choose the shape (or check
  * the override), compose the cards, take the drills and the anchor, and store what was served.
  * Unseen graded feedback comes first. An empty composition stores nothing and returns the reason.
+ * A focus (the hardest cards, or one grammar topic) makes a Nhanh session of existing cards only.
  */
-export function startSession(db: DbOrTx, now: Date, options: { budgetMin?: number; shape?: SessionShape } = {}): StartResponse {
+export function startSession(db: DbOrTx, now: Date, options: { budgetMin?: number; shape?: SessionShape; focus?: Focus } = {}): StartResponse {
+	const { focus } = options;
+	if (focus !== undefined && options.shape !== undefined && options.shape !== 'quick') {
+		throw new SessionError(400, 'invalid', 'a focus session is always quick');
+	}
 	return db.transaction((tx) => {
 		const sessions = sessionsRepo(tx);
 		sessions.abandonInProgress(now);
 		const budgetMin = options.budgetMin ?? settingsRepo(tx).get().defaultSessionBudget;
-		const shape = resolveShape(shapeContext(tx, budgetMin), options.shape);
+		const shape = focus === undefined ? resolveShape(shapeContext(tx, budgetMin), options.shape) : 'quick';
 		if (shape === null) throw new SessionError(400, 'shape_unavailable', `shape ${options.shape} is not available now`);
 		const feedback = unseenFeedbackCards(tx);
 		const band = profileRepo(tx).get().knownBandCeiling;
 		const seed = String(now.getTime());
 
-		const composed = composeSession(tx, now, { budgetMin, shape });
-		const drills = shape === 'quick' ? [] : takeDrills(tx, now, band, seed);
-		const anchored = shape === 'read' ? readingAnchor(tx, now, band) : shape === 'write' ? writeAnchor(tx, now, band, seed) : null;
+		const composed = focus === undefined ? composeSession(tx, now, { budgetMin, shape }) : composeFocus(tx, now, focus, budgetMin);
+		const drills = focus?.kind === 'topic' ? takeTopicDrills(tx, now, band, focus.code) : shape === 'quick' ? [] : takeDrills(tx, now, band, seed);
+		const anchored = focus !== undefined ? null : shape === 'read' ? readingAnchor(tx, now, band) : shape === 'write' ? writeAnchor(tx, now, band, seed) : null;
 		if (composed.items.length === 0 && drills.length === 0 && anchored === null) {
 			return { sessionId: null, startedAt: now.getTime(), shape, items: [], drills: [], anchor: null, feedback, reason: composed.reason ?? 'all_done' };
 		}

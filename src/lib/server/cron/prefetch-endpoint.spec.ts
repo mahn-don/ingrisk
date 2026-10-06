@@ -15,7 +15,7 @@ const { PREFETCH_LOCK, PREFETCH_STALE_LOCK_MS } = await import('../generation/st
 
 const SECRET = 'not-a-real-secret';
 const NOW = new Date('2026-10-05T20:00:00Z');
-const summary = { added: {}, rejected: {}, llmFailed: {}, notRun: 0, shortfall: [], steps: [], budgetExhausted: false, llm: { calls: 0, usage: [] }, writing: { graded: 0, failed: 0, remaining: 0 } };
+const summary = { added: {}, rejected: {}, llmFailed: {}, notRun: 0, shortfall: [], steps: [], budgetExhausted: false, llm: { calls: 0, usage: [] }, writing: { graded: 0, failed: 0, remaining: 0 }, expiredSessionsDeleted: 0 };
 
 function setup(env: Record<string, string | undefined> = { CRON_SECRET: SECRET }, run = vi.fn(async () => summary)) {
 	const db = createTestDb();

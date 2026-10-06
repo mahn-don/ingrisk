@@ -12,8 +12,11 @@ const SERVERS = {
 	unconfigured: { port: 4174, db: `${E2E_DIR}/unconfigured.db` },
 	rateLimit: { port: 4175, db: `${E2E_DIR}/rate-limit.db` },
 	placement: { port: 4176, db: `${E2E_DIR}/placement.db` },
-	session: { port: 4177, db: `${E2E_DIR}/session.db` }
+	session: { port: 4177, db: `${E2E_DIR}/session.db` },
+	progress: { port: 4178, db: `${E2E_DIR}/progress.db` }
 } as const;
+/** A fake value for the provider-key variable the settings test names (never a real key). */
+const E2E_FAKE_PROVIDER_KEY = 'e2e-fake-provider-value-not-a-key';
 
 // The config is loaded again in every worker: only the main process resets the databases.
 const isWorker = process.env.TEST_WORKER_INDEX !== undefined;
@@ -58,6 +61,13 @@ export default defineConfig({
 			SERVERS.session.db,
 			{ APP_PASSWORD_HASH: passwordHash, LLM_CANNED: '1', NODE_ENV: 'test', CRON_SECRET: E2E_CRON_SECRET },
 			`sh -c 'node tool/seed-test-db.ts --db ${SERVERS.session.db} --per-band 30 --anchors && ${waitForBuild} npm run preview -- --port ${SERVERS.session.port} --strictPort'`
+		),
+		// Progress, the review book and settings: seeded like the session server, plus a history.
+		server(
+			SERVERS.progress.port,
+			SERVERS.progress.db,
+			{ APP_PASSWORD_HASH: passwordHash, LLM_CANNED: '1', NODE_ENV: 'test', E2E_FAKE_PROVIDER_KEY },
+			`sh -c 'node tool/seed-test-db.ts --db ${SERVERS.progress.db} --per-band 30 --anchors && ${waitForBuild} npm run preview -- --port ${SERVERS.progress.port} --strictPort'`
 		)
 	],
 	projects: [
@@ -65,6 +75,7 @@ export default defineConfig({
 		{ name: 'unconfigured', testMatch: /unconfigured\.e2e\.ts$/, use: { baseURL: `http://localhost:${SERVERS.unconfigured.port}` } },
 		{ name: 'rate-limit', testMatch: /rate-limit\.e2e\.ts$/, use: { baseURL: `http://localhost:${SERVERS.rateLimit.port}` } },
 		{ name: 'placement', testMatch: /placement\.e2e\.ts$/, use: { baseURL: `http://localhost:${SERVERS.placement.port}` } },
-		{ name: 'session', testMatch: /session\.e2e\.ts$/, use: { baseURL: `http://localhost:${SERVERS.session.port}` } }
+		{ name: 'session', testMatch: /session\.e2e\.ts$/, use: { baseURL: `http://localhost:${SERVERS.session.port}` } },
+		{ name: 'progress', testMatch: /progress\.e2e\.ts$/, use: { baseURL: `http://localhost:${SERVERS.progress.port}` } }
 	]
 });

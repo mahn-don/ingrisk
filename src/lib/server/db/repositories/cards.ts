@@ -24,7 +24,7 @@ export function cardsRepo(db: DbOrTx) {
 			return db
 				.select()
 				.from(cards)
-				.where(and(ne(cards.state, 'New'), lte(cards.due, now)))
+				.where(and(ne(cards.state, 'New'), lte(cards.due, now), eq(cards.suspended, false)))
 				.orderBy(asc(cards.due), asc(cards.id))
 				.limit(limit)
 				.all();
@@ -38,7 +38,7 @@ export function cardsRepo(db: DbOrTx) {
 				.select({ card: cards })
 				.from(cards)
 				.leftJoin(clozeItems, eq(clozeItems.id, cards.clozeItemId))
-				.where(and(eq(cards.state, 'New'), or(isNull(clozeItems.gapType), ne(clozeItems.gapType, 'user_error'))))
+				.where(and(eq(cards.state, 'New'), eq(cards.suspended, false), or(isNull(clozeItems.gapType), ne(clozeItems.gapType, 'user_error'))))
 				.orderBy(asc(cards.id))
 				.limit(limit)
 				.all()
@@ -50,7 +50,7 @@ export function cardsRepo(db: DbOrTx) {
 				.select({ card: cards })
 				.from(cards)
 				.innerJoin(clozeItems, eq(clozeItems.id, cards.clozeItemId))
-				.where(and(eq(cards.state, 'New'), eq(clozeItems.gapType, 'user_error')))
+				.where(and(eq(cards.state, 'New'), eq(cards.suspended, false), eq(clozeItems.gapType, 'user_error')))
 				.orderBy(asc(cards.id))
 				.limit(limit)
 				.all()
@@ -64,6 +64,7 @@ export function cardsRepo(db: DbOrTx) {
 					learning: sql<number>`coalesce(sum(${inArray(cards.state, ['Learning', 'Relearning'])}), 0)`
 				})
 				.from(cards)
+				.where(eq(cards.suspended, false))
 				.get();
 			return { due: row?.due ?? 0, new: row?.new ?? 0, learning: row?.learning ?? 0 };
 		},
@@ -78,9 +79,9 @@ export function cardsRepo(db: DbOrTx) {
 			if (ids.length === 0) return [];
 			return db.select().from(cards).where(inArray(cards.id, [...ids])).all();
 		},
-		/** The earliest due time among introduced (not New) cards; null when there are none. */
+		/** The earliest due time among introduced (not New), not suspended cards; null when there are none. */
 		earliestIntroducedDue(): Date | null {
-			const row = db.select({ due: min(cards.due) }).from(cards).where(ne(cards.state, 'New')).get();
+			const row = db.select({ due: min(cards.due) }).from(cards).where(and(ne(cards.state, 'New'), eq(cards.suspended, false))).get();
 			return row?.due ?? null;
 		},
 		/** Cloze item ids that already have a card. */
@@ -95,6 +96,45 @@ export function cardsRepo(db: DbOrTx) {
 		},
 		setPromptMode(id: number, mode: CardRow['promptMode']): void {
 			db.update(cards).set({ promptMode: mode }).where(and(eq(cards.id, id), ne(cards.promptMode, mode))).run();
+		},
+		/** Hide a card from every queue and count (its history stays), or show it again. */
+		setSuspended(id: number, suspended: boolean): boolean {
+			return db.update(cards).set({ suspended }).where(eq(cards.id, id)).run().changes > 0;
+		},
+		/** "Ôn ngay": due now (FSRS later uses the real elapsed time). */
+		dueNow(id: number, now: Date): boolean {
+			return db.update(cards).set({ due: now }).where(eq(cards.id, id)).run().changes > 0;
+		},
+		/** Introduced (not New), not suspended cards: their due times, for the review forecast. */
+		introducedDue(): Date[] {
+			return db
+				.select({ due: cards.due })
+				.from(cards)
+				.where(and(ne(cards.state, 'New'), eq(cards.suspended, false)))
+				.all()
+				.map((r) => r.due);
+		},
+		/** The stats page's card totals (suspended cards count: they were learned). */
+		progressTotals(): { wordsLearned: number; cardsInLearning: number; minedAdded: number; minedInReview: number; minedWaiting: number } {
+			const isMined = sql`${clozeItems.gapType} = 'user_error'`;
+			const row = db
+				.select({
+					wordsLearned: sql<number>`coalesce(sum(${clozeItems.gapType} = 'lexical' and ${cards.state} = 'Review'), 0)`,
+					cardsInLearning: sql<number>`coalesce(sum(${cards.state} in ('Learning', 'Relearning') and ${cards.suspended} = 0), 0)`,
+					minedAdded: sql<number>`coalesce(sum(${isMined}), 0)`,
+					minedInReview: sql<number>`coalesce(sum(${isMined} and ${cards.state} = 'Review'), 0)`,
+					minedWaiting: sql<number>`coalesce(sum(${isMined} and ${cards.state} = 'New' and ${cards.suspended} = 0), 0)`
+				})
+				.from(cards)
+				.leftJoin(clozeItems, eq(clozeItems.id, cards.clozeItemId))
+				.get();
+			return {
+				wordsLearned: row?.wordsLearned ?? 0,
+				cardsInLearning: row?.cardsInLearning ?? 0,
+				minedAdded: row?.minedAdded ?? 0,
+				minedInReview: row?.minedInReview ?? 0,
+				minedWaiting: row?.minedWaiting ?? 0
+			};
 		},
 		/** Persist a card's updated scheduling state (and prompt mode). */
 		save(card: CardRow): CardRow {

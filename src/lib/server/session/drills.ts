@@ -47,26 +47,40 @@ export function chooseDrillCodes(profile: ReadonlyMap<string, number>, inStock: 
 	return Array.from({ length: n }, (_, i) => order[i % order.length]);
 }
 
+function toDrillItem(row: { id: number; payloadJson: unknown }, names: ReadonlyMap<string, string>): DrillItem {
+	const p = row.payloadJson as DrillPayload;
+	return {
+		cacheId: row.id,
+		topicCode: p.topic_code as TopicCode,
+		topicNameVi: names.get(p.topic_code) ?? p.topic_code,
+		sentenceWithError: p.sentence_with_error,
+		corrected: p.corrected,
+		originalSpan: p.original_span,
+		correctedSpan: p.corrected_span,
+		explanationVi: p.explanation_vi
+	};
+}
+
+function takeForCodes(db: DbOrTx, now: Date, band: number, codes: readonly string[]): DrillItem[] {
+	const cache = cacheRepo(db);
+	const names = new Map(grammarTopicsRepo(db).all().map((t) => [t.code, t.nameVi]));
+	const drills: DrillItem[] = [];
+	for (const code of codes) {
+		const row = cache.takeNearest('error', band, { paramsHash: drillParamsHash(code as TopicCode), now });
+		if (row !== undefined) drills.push(toDrillItem(row, names));
+	}
+	return drills;
+}
+
 /** Take the session's drills (marked served) for these codes, nearest to `band`. */
 export function takeDrills(db: DbOrTx, now: Date, band: number, seed: string): DrillItem[] {
 	const cache = cacheRepo(db);
 	const inStock = DRILL_CODES.filter((code) => cache.hasUnservedNear('error', band, 8, drillParamsHash(code)));
-	const names = new Map(grammarTopicsRepo(db).all().map((t) => [t.code, t.nameVi]));
-	const drills: DrillItem[] = [];
-	for (const code of chooseDrillCodes(weaknessProfile(db, now), inStock, DRILLS_PER_SESSION, seed)) {
-		const row = cache.takeNearest('error', band, { paramsHash: drillParamsHash(code as TopicCode), now });
-		if (row === undefined) continue;
-		const p = row.payloadJson as DrillPayload;
-		drills.push({
-			cacheId: row.id,
-			topicCode: p.topic_code as TopicCode,
-			topicNameVi: names.get(p.topic_code) ?? p.topic_code,
-			sentenceWithError: p.sentence_with_error,
-			corrected: p.corrected,
-			originalSpan: p.original_span,
-			correctedSpan: p.corrected_span,
-			explanationVi: p.explanation_vi
-		});
-	}
-	return drills;
+	return takeForCodes(db, now, band, chooseDrillCodes(weaknessProfile(db, now), inStock, DRILLS_PER_SESSION, seed));
+}
+
+/** A topic focus session: up to 2 cached drills of that code (none when it has no drill stock). */
+export function takeTopicDrills(db: DbOrTx, now: Date, band: number, code: TopicCode): DrillItem[] {
+	if (!(DRILL_CODES as readonly string[]).includes(code)) return [];
+	return takeForCodes(db, now, band, Array<string>(DRILLS_PER_SESSION).fill(code));
 }

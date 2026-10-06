@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { DbOrTx } from '../db/client.ts';
 import { jobLocksRepo } from '../db/repositories/job-locks.ts';
+import { llmCallsRepo } from '../db/repositories/llm-calls.ts';
 import { DailyCapError } from '../generation/budget.ts';
 import type { PrefetchSummary } from '../generation/prefetch.ts';
 import { DEFAULT_PREFETCH_MAX_CALLS, PREFETCH_LOCK, PREFETCH_STALE_LOCK_MS } from '../generation/stock.ts';
@@ -54,4 +55,51 @@ export async function handlePrefetch(request: Request, deps: PrefetchEndpointDep
 	} finally {
 		locks.release(PREFETCH_LOCK, holder);
 	}
+}
+
+/** "Tạo thêm bài tập" on the settings page: this many calls at most. */
+export const SETTINGS_PREFETCH_MAX_CALLS = 30;
+
+export type BackgroundPrefetch =
+	| { status: 'started'; done: Promise<PrefetchSummary | null> }
+	| { status: 'locked' }
+	| { status: 'capped'; used: number; cap: number };
+
+export interface BackgroundPrefetchDeps {
+	db: DbOrTx;
+	now: () => Date;
+	dailyCap: number;
+	run: (options: { maxCalls: number }) => Promise<PrefetchSummary>;
+	log?: (message: string) => void;
+}
+
+/**
+ * Start a prefetch run in the background (the settings button): the same lock as the cron
+ * endpoint, and refused up front when the daily cap is reached. `done` settles when the run ends
+ * (null on failure); the lock is released then.
+ */
+export function startBackgroundPrefetch(deps: BackgroundPrefetchDeps, maxCalls = SETTINGS_PREFETCH_MAX_CALLS): BackgroundPrefetch {
+	const now = deps.now();
+	const used = llmCallsRepo(deps.db).countSince(new Date(now.getTime() - 86_400_000));
+	if (used >= deps.dailyCap) return { status: 'capped', used, cap: deps.dailyCap };
+	const locks = jobLocksRepo(deps.db);
+	const holder = randomUUID();
+	if (!locks.acquire(PREFETCH_LOCK, holder, now, PREFETCH_STALE_LOCK_MS)) return { status: 'locked' };
+	const done = (async () => {
+		try {
+			return await deps.run({ maxCalls });
+		} catch (error) {
+			deps.log?.(`prefetch failed: ${(error as Error).message}`);
+			return null;
+		} finally {
+			locks.release(PREFETCH_LOCK, holder);
+		}
+	})();
+	return { status: 'started', done };
+}
+
+/** Whether a prefetch run holds the lock now (a stale lock does not count). */
+export function prefetchRunning(db: DbOrTx, now: Date): boolean {
+	const lock = jobLocksRepo(db).get(PREFETCH_LOCK);
+	return lock !== undefined && now.getTime() - lock.acquiredAt.getTime() < PREFETCH_STALE_LOCK_MS;
 }

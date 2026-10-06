@@ -34,7 +34,8 @@ export interface SessionItem {
 	intervals: Record<Grade, { value: number; unit: IntervalUnit }>;
 }
 
-export type EmptyReason = 'no_content' | 'all_done';
+/** focus_empty: a focus session (hardest cards, one topic) found nothing to practise. */
+export type EmptyReason = 'no_content' | 'all_done' | 'focus_empty';
 
 /** A one-off error-correction drill (Phase 9b): not a card. */
 export interface DrillItem {

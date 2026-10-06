@@ -23,5 +23,6 @@ when that phase starts; delete it when done.
 - **Phase 7:** `/etc/silentenglish/.env` uses the `.env.example` HTTP mode (`ORIGIN` exactly as in
   the address bar, `COOKIE_SECURE=false`, `HOST=0.0.0.0`, `PORT=3000`); ufw opens only SSH and 3000;
   the cron call needs `Content-Type: application/json`.
-- **Phase 7:** add a nightly `authSessionsRepo.deleteExpired()` sweep (expired rows are already
-  deleted when presented; this only tidies sessions that are never used again).
+- **Phase 7:** the nightly cron call to `/api/cron/prefetch` is also the expired-session sweep:
+  since Phase 10, every prefetch run starts with `authSessionsRepo.deleteExpired()` (and each
+  successful login does too), so no separate job is needed.

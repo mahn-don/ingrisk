@@ -67,6 +67,7 @@
 			const body: Record<string, unknown> = {};
 			if (data.budgetMin !== null) body.budgetMin = data.budgetMin;
 			if (data.shape !== null) body.shape = data.shape;
+			if (data.focus !== null) body.focus = data.focus;
 			const response = await fetch('/api/session/start', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 			if (response.status === 401) return void (window.location.href = `/login?next=${encodeURIComponent('/session')}`);
 			if (!response.ok) throw new Error(String(response.status));
@@ -209,7 +210,7 @@
 			</section>
 		{:else if phase === 'empty'}
 			<div class="flex flex-1 items-center justify-center" data-testid="session-empty">
-				<EmptyState title={reason === 'no_content' ? m.emptyNoContentTitle : m.emptyDoneTitle} body={reason === 'no_content' ? m.emptyNoContent : m.emptyDone}>
+				<EmptyState title={m.empty[reason].title} body={m.empty[reason].body}>
 					{#snippet action()}<Button variant="secondary" full href="/">{m.backHome}</Button>{/snippet}
 				</EmptyState>
 			</div>

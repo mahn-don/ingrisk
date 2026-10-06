@@ -180,7 +180,7 @@ export interface ComposedSession {
 	created: number;
 }
 
-function toItem(card: CardRow, item: SessionClozeItem, now: Date, scheduler: FSRS): SessionItem {
+export function toItem(card: CardRow, item: SessionClozeItem, now: Date, scheduler: FSRS): SessionItem {
 	const mode = promptMode(card, item.gapType, item.typingOnly);
 	const tokens = tokenize(item.enText);
 	const first = tokens[item.tokenIndex];

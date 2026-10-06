@@ -205,7 +205,7 @@ Read and Write alternate across days. If a graded writing submission has unseen 
 - **Đọc anchor.** One cached passage nearest `known_band_ceiling` (within one band), marked served. Glossary words are underlined and show their Vietnamese meaning; "Thêm vào ôn tập" creates a New card when a validated lexical cloze item exists for the word's lexeme (it is introduced within the daily limit). Then the 2 questions, each with feedback and its explanation.
 - **Viết anchor.** Writing and translation alternate across Viết sessions. Writing: a prompt for the band not used in the last 14 days. Translation: a Tatoeba sentence at or below the band, without stock names, never served before; the feedback says plainly whether the meaning came across and shows the reference as one valid answer. The submission is stored (queued) and graded for up to 30 s; in time, the feedback is shown inline (corrected text with the changes highlighted in direct mode; up to 3 errors with their code's Vietnamese name; the task note when off topic); otherwise the session goes on and the feedback comes at the next start.
 - **Error mining** (`session/mining.ts`). Every graded error (at most 3 per submission) whose correction is found exactly once in the corrected text, and is at most 4 tokens long, becomes a `user_error` cloze item on that corrected sentence (its own `sentences` row, Vietnamese from the prompt or source) with a New card made at once. Options: the learner's own wrong form plus distractors from the 5a tables (ART, PRE, SVA, TNS, PLU); other codes, or fewer than 3 distractors, are typing-only. An identical sentence and span is never mined twice.
-- **End screen.** Items answered, accuracy, words strengthened (reviewed cards whose stability rose; first reviews excluded), new cards, the next review time and today's study minutes; plus the anchor's outcome (reading score, or writing graded / later / skipped), drills right, and "Lỗi mới được thêm vào ôn tập: N". Streaks and the weekly goal are Phase 10.
+- **End screen.** Items answered, accuracy, words strengthened (reviewed cards whose stability rose; first reviews excluded), new cards, the next review time and today's study minutes; plus the anchor's outcome (reading score, or writing graded / later / skipped), drills right, and "Lỗi mới được thêm vào ôn tập: N". Streaks and the weekly goal live on the stats page and Home's "today" card (Phase 10).
 
 **Error mining:** every error the LLM identifies becomes a candidate card tagged with its taxonomy code, so the review pool gradually targets the learner's real weaknesses.
 
@@ -217,6 +217,17 @@ Rigid daily streaks cause anxiety and abandonment after one missed day. Duolingo
 
 **Build:** a flexible streak with auto-freeze (2 banked, one earned per 5 sessions, consumed automatically on a missed day); a **weekly** goal (default 5 of 7 days) as the headline metric; a calendar heat-map; a cumulative "words strengthened" count.
 **Do not build:** hearts or lives, leagues, leaderboards, loss-framed messaging, daily-only streaks.
+
+**As built (Phase 10, `src/lib/server/progress/`).** Everything is recomputed from the history on each read; no streak state is stored.
+- **Studied day:** a learning day (from 04:00 Asia/Ho_Chi_Minh) with at least one finished session in which at least 5 items were answered.
+- **Streak:** the days are replayed from the first session. A studied day adds one. A missed day spends a banked freeze when the streak is running, else resets it to 0. Today, not yet studied, never breaks it. Every 5th finished session (of any size) earns a freeze after that day is evaluated; at most 2 are banked. The stats page shows the number with "ngày liên tiếp" (no flame), the freezes with a one-line explanation, and the days a freeze covered.
+- **Weekly goal:** `settings.weekly_goal_days` (default 5) studied days per Monday-start week of learning days; this week's progress plus hit or miss for each of the 8 weeks before (weeks before the first session are "not started", not misses).
+- **Heat-map:** the last 12 Monday-start weeks; minutes are the sum of the answers' response times (`summary_json.studyMs`), in 4 buckets (none, under 5, 5–9, 10+). Cells grow in size as well as colour, and a hidden table carries the same data for screen readers.
+- **Forecast:** cards due on each of the next 7 learning days (today includes the overdue), drawn as bars with their values.
+- **Totals:** words learned (lexical cards in Review), cards in learning, minutes, sessions, mined errors added and mined errors in Review. The "words strengthened" count stays on each session's end screen.
+- **Weakness profile:** per grammar topic over 30 days: graded-writing errors, drill accuracy and grammar cloze accuracy per gap type; weakest first (most errors, then the lowest accuracy). Each topic offers **Luyện chủ đề này**: a Nhanh session of that topic's introduced cards plus up to 2 of its cached drills.
+- **Level history:** every completed placement result (CEFR, ability band).
+- Home shows a compact "today" card: the streak and freezes, this week's goal, the next review time and the mined errors waiting.
 
 ---
 
@@ -350,9 +361,12 @@ cards(id, kind, lexeme_id → lexemes, sentence_id → sentences,
       cloze_item_id → cloze_items,                -- all ON DELETE RESTRICT
       prompt_mode,
       due, stability, difficulty, elapsed_days, scheduled_days, learning_steps,
-      reps, lapses, state, last_review)           -- every field of ts-fsrs Card
+      reps, lapses, state, last_review,           -- every field of ts-fsrs Card
+      suspended)                                  -- 0009: hidden by the learner (review book)
 -- UNIQUE (kind, lexeme_id, sentence_id, grammar_topic_id), NULLs counted as 0.
 -- cloze_item_id (migration 0003) is UNIQUE when not NULL: a pool item becomes at most one card.
+-- suspended (migration 0009, default 0): "Tạm ẩn" in the review book. A suspended card is out of
+-- every queue (due, new, mined, focus sessions), every count and the forecast; its review_logs stay.
 review_logs(id, card_id → cards ON DELETE RESTRICT,
             rating, state, due, stability, difficulty, elapsed_days,
             last_elapsed_days, scheduled_days, learning_steps, review,
@@ -445,6 +459,8 @@ generateText({ purpose, system, user, ... }) → { text, usage, model, providerI
 
 Surface a clear Vietnamese error in the UI if all providers fail. Do not hard-code prices: model tiers and rates change often.
 
+**Provider management UI (Phase 10, `/settings/providers`).** Lists each provider's name, base URL, model, wire format, structured mode, the env variable **name**, and whether that variable is set on the server now (a boolean: `Boolean(process.env[name]?.trim())`). Add, edit and delete; make one active; make one the fallback (setting a new fallback clears the old one in one transaction). The form is validated with Zod: the Phase 4 base-URL rule and the env-name rule `^[A-Z][A-Z0-9_]{0,63}$` (Anthropic needs one). **The UI never handles a key value**: no field accepts one, no response carries one, and a note says keys live in the server's `.env`. **Kiểm tra kết nối** runs the shared smoke call (`llm/smoke.ts`, also behind `npm run llm:smoke`) on that provider without fallback and shows OK with the latency, or the error code and the redacted message. Settings also shows LLM calls and tokens per day for the last 7 days, by purpose.
+
 ### 5. Generation and the validation pipeline
 
 Generation is batch and ahead of time, never during a session. Every prompt module in `src/lib/server/llm/prompts/` exports a `PROMPT_VERSION` string, stored with every item it produces (`cloze_items.prompt_version`, `generated_cache.prompt_version`), so a changed prompt can be traced and its items rebuilt.
@@ -532,7 +548,7 @@ Constraining `topic_code` to the enum is what makes error mining work: free-text
 
 The app is on the public internet, so:
 - **A single password gate.** The password's argon2id hash (`npm run auth:hash`, which prompts twice with hidden input) lives in `APP_PASSWORD_HASH`. Unset or not an argon2id hash means nobody can log in and every page stays closed: it fails closed.
-- **The chokepoint is `handle` in `src/hooks.server.ts`**, not a layout: layout loads do not run for `+server.ts` endpoints, so a layout guard would leave `/api/*` open. Every request (pages, form actions, data requests, endpoints) resolves the session into `event.locals.session` and passes `accessFor()` (`src/lib/server/auth/guard.ts`). Only an explicit allowlist is public: `/login`, `/api/cron/*` (own secret), `/favicon.svg`, `/robots.txt`, `/_app/immutable/*`, `/_app/version.json`, `/_app/env.js` (not all of `/_app/`: `/_app/remote/*` would be server code). Anything else without a session: pages get 303 to `/login?next=<path>`, `/api/*` gets 401 JSON (503 JSON when login is not configured). `next` must be a same-origin relative path (never `//evil.com`, absolute URLs or backslash tricks), else `/`. `(app)/+layout.server.ts` only exposes session info; it is not a security boundary.
+- **The chokepoint is `handle` in `src/hooks.server.ts`**, not a layout: layout loads do not run for `+server.ts` endpoints, so a layout guard would leave `/api/*` open. Every request (pages, form actions, data requests, endpoints) resolves the session into `event.locals.session` and passes `accessFor()` (`src/lib/server/auth/guard.ts`). Only an explicit allowlist is public (the backup download `/api/backup` is not on it): `/login`, `/api/cron/*` (own secret), `/favicon.svg`, `/robots.txt`, `/_app/immutable/*`, `/_app/version.json`, `/_app/env.js` (not all of `/_app/`: `/_app/remote/*` would be server code). Anything else without a session: pages get 303 to `/login?next=<path>`, `/api/*` gets 401 JSON (503 JSON when login is not configured). `next` must be a same-origin relative path (never `//evil.com`, absolute URLs or backslash tricks), else `/`. `(app)/+layout.server.ts` only exposes session info; it is not a security boundary.
 - **Sessions are server-side** (`auth_sessions(id, created_at, expires_at, last_seen_at)`, migration 0005). The cookie `se_session` holds 32 random bytes (base64url); the table stores only their SHA-256, so a copy of the database cannot log anyone in. 30 days, sliding: on use, `last_seen_at` and the expiry move forward at most once an hour. Logout (a POST action) deletes the row and the cookie; an expired row is deleted when presented.
 - **Cookies:** `httpOnly`, `sameSite=lax`, `path=/`; `secure` from `COOKIE_SECURE` (default true). `false` is allowed for any `ORIGIN`, because the app is served over plain HTTP on an IP (Part 0, Decisions). With `false` and a non-local origin, the server logs a startup warning and the login page shows a small, non-blocking notice: "Kết nối không mã hóa". The theme preference (`system`/`light`/`dark`) is a cookie too, so the server renders `data-theme` on `<html>` and the first paint is right.
 - **`ORIGIN`** must equal the URL in the browser exactly (now `http://103.82.195.48:3000`; `http://localhost:3000` through an SSH tunnel); otherwise SvelteKit's CSRF check rejects the login form with 403. **It is read at build time** (`vite.config.ts` → `paths.origin`): adapter-node 6 (SvelteKit 3) has no runtime `ORIGIN` variable and, without `paths.origin`, assumes `https://<host>`, which over plain HTTP rejects every form POST. Build with `ORIGIN` set and rebuild after changing it.
@@ -573,7 +589,7 @@ Total cost: the VPS, plus LLM usage of a few cents per month.
 - **Adapters:** mocked HTTP only; one test per wire-format divergence, plus the key-leak test.
 - **Validation pipeline:** fixtures of known-good and known-bad items; assert accept/reject.
 - **Database:** in-memory SQLite; migration tests from each earlier schema version.
-- **E2E:** Playwright for login, a full session, and the placement test.
+- **E2E:** Playwright for login, a full session, the placement test, and (Phase 10) stats, the review book, settings, providers and the backup.
 - **Eval set:** ~30 exercise items and ~10 writing samples reviewed by a human, in `test/eval/`. Re-run after every prompt change: a prompt edit that quietly degrades quality is otherwise invisible.
 
 ### 10. Content sources and licensing
@@ -891,18 +907,20 @@ Deploy early, while the app is nearly empty. Infrastructure problems are much ch
 
 ---
 
-#### Phase 10 — Settings, stats, motivation
+#### Phase 10 — Progress, review book, settings and providers
 
-> Build the Settings and Stats routes.
+> **Motivation** (`src/lib/server/progress/`, recomputed on read): studied days (≥ 5 items, 04:00 boundary), the streak with auto-freeze, the weekly goal, the 12-week heat-map, the 7-day forecast, totals, the weakness profile and the level history, exactly as Part I §9 describes. **Do not implement** hearts or lives, leagues, leaderboards, loss-framed messaging, or a daily-only streak.
 >
-> **Settings:** manage LLM providers (name, base_url, model, wire_format, which env var holds the key, mark one as fallback, a "test connection" button); desired retention slider 0.70–0.97 with a plain-Vietnamese explanation of the trade-off; default session budget; weekly goal days; feedback mode (direct plus metalinguistic, or indirect); retake placement; run prefetch now; a credits page generated from the distinct `license_tag` values in the database.
+> **`/stats` ("Tiến độ"):** the streak (a number and "ngày liên tiếp", no flame), freezes with a short explanation, this week's goal; a hand-rolled SVG heat-map and forecast, each with a text alternative and AA contrast in both themes; the weakness list with **Luyện chủ đề này**; totals and level history.
 >
-> **Motivation — implement exactly this and nothing more:** a flexible streak with auto-freeze (2 banked, one earned per 5 sessions, consumed automatically on a missed day); a weekly goal defaulting to 5 of 7 days as the headline metric; a calendar heat-map; a cumulative words-strengthened count. **Do not implement** hearts or lives, leagues, leaderboards, loss-framed messaging, or a daily-only streak.
+> **Review book ("Sổ ôn tập", a tab between Tiến độ and Cài đặt):** "Hay sai" (lapses, then the lowest retrievability; mined errors always in, tagged "Lỗi của bạn") with **Ôn các thẻ hay sai** (a Nhanh session of the 15 hardest unsuspended cards regardless of due); "Đã học" (every non-New card, searchable by English, answer or Vietnamese; the next review in plain words); a detail sheet (the sentence with the answer highlighted, the Vietnamese, `answer_vi`, gap type and topic, source, review history with the interval each review set) with **Ôn ngay** (due = now) and **Tạm ẩn / Bỏ ẩn** (`cards.suspended`, migration 0009). Focus sessions: the start body takes `focus: { kind: 'hard' } | { kind: 'topic', code }`, validated with Zod; they serve existing cards only (no new cards, no anchor).
 >
-> Keep every string in `messages/vi.ts`.
+> **Settings:** Học tập (retention 0.70–0.97 with "cao hơn = nhớ chắc hơn nhưng ôn nhiều hơn", new cards per day 0–50, default budget 5/8/10, weekly goal 1–7, feedback mode, retake placement), validated with Zod like the CHECKs and applied from the next session; Giao diện; Nội dung (stock per band and per topic, and **Tạo thêm bài tập**: a background prefetch of at most 30 calls under the prefetch lock and the daily cap, disabled without an active provider); Nhà cung cấp AI (Part II §4); Sử dụng AI (7 days); Dữ liệu (**Tải bản sao lưu**: `VACUUM INTO` a temp file, downloaded behind auth, the file deleted; **Nguồn dữ liệu & giấy phép**, from the `license_tag`s present and the word-list package's metadata); Tài khoản.
+>
+> **Home:** a compact "today" card replaces the tagline. **Housekeeping:** expired `auth_sessions` are deleted on each successful login and at the start of each prefetch run.
 
-**Result:** settings, stats and a gentle motivation layer.
-**Check:** add one OpenAI-compatible and one Anthropic provider and confirm both work; open `app.db` with sqlite3 and confirm no string resembling an API key is present.
+**Result:** progress, the review book, settings and provider management (`plans/phase-10.md`).
+**Check:** add one OpenAI-compatible and one Anthropic provider and confirm both work; open `app.db` with sqlite3 and confirm no string resembling an API key is present; download a backup and open it.
 
 ---
 

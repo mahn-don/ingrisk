@@ -275,6 +275,8 @@ export function cannedFetch(opts: CannedOptions): typeof globalThis.fetch {
 					...feedback(String(payload.learner_translation), Number(/band (\d)/.exec(String(payload.learner_level))?.[1] ?? 1)),
 					meaning_ok: true
 				});
+			case 'smoke':
+				return reply({ word: String(payload.word ?? 'borrow'), cefr: 'B1', vi_gloss: 'mượn' });
 			default:
 				return new Response(JSON.stringify({ error: { message: `canned LLM: unknown purpose ${purpose}` } }), { status: 400 });
 		}
