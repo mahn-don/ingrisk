@@ -3,6 +3,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
+	import { fill, formatDate } from '#lib/format.js';
 	import { t } from '#lib/messages/vi.js';
 	import { THEMES, type Theme } from '#lib/theme.js';
 
@@ -43,6 +44,20 @@
 				{/each}
 			</fieldset>
 		</form>
+	</Card>
+
+	<Card title={t.settings.placement}>
+		{#if data.placement}
+			<p data-testid="settings-placement">
+				{fill(t.settings.placementLast, { cefr: data.placement.cefr, date: formatDate(data.placement.takenAt) })}
+				<a class="font-semibold text-primary underline" href="/placement/result/{data.placement.id}">{t.settings.placementSeeResult}</a>
+			</p>
+		{:else}
+			<p class="text-muted">{t.settings.placementNone}</p>
+		{/if}
+		<div class="mt-4">
+			<Button variant="secondary" full href="/placement?restart">{data.placement ? t.settings.placementRetake : t.settings.placementTake}</Button>
+		</div>
 	</Card>
 
 	<Card title={t.settings.account}>

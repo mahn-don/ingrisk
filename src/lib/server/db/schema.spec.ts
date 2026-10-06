@@ -11,7 +11,9 @@ import {
 	grammarTopics,
 	lexemes,
 	llmProviders,
+	placementAttempts,
 	placementResults,
+	type PlacementSubscores,
 	reviewLogs,
 	sentences,
 	sessions,
@@ -60,6 +62,7 @@ describe('migrations', () => {
 			'lexemes',
 			'llm_calls',
 			'llm_providers',
+			'placement_attempts',
 			'placement_results',
 			'review_logs',
 			'sentences',
@@ -297,13 +300,39 @@ describe('create, read and update every content table', () => {
 
 	it('placement_results', () => {
 		const db = createTestDb();
+		const subscores: PlacementSubscores = {
+			vocab: 3,
+			falseAlarmRate: 0.1,
+			lexical: { correct: 4, total: 6 },
+			grammar: { correct: 3, total: 6 },
+			grammarByType: { article: { correct: 1, total: 2 } },
+			writing: null
+		};
 		const row = db
 			.insert(placementResults)
-			.values({ takenAt: new Date(1_800_000_000_000), theta: 1200, cefr: 'A2', subscoresJson: { vocab: 1, grammar: 2, reading: 3, writing: null }, itemLogJson: [{ item: 'plurthy', correct: true }] })
+			.values({
+				takenAt: new Date(1_800_000_000_000),
+				theta: 3.2,
+				cefr: 'A2',
+				subscoresJson: subscores,
+				itemLogJson: [{ part: 'A', item: 'plurthy', band: 2, shownAt: 1, answeredAt: 2, responseMs: 1, answer: false, correct: true, real: false }]
+			})
 			.returning()
 			.get();
-		db.update(placementResults).set({ writingStatus: 'queued' }).where(eq(placementResults.id, row.id)).run();
-		expect(db.select().from(placementResults).get()).toEqual({ ...row, writingStatus: 'queued' });
+		expect(row).toMatchObject({ vocabBand: 1, abilityBand: 1, clozeTheta: null, writingSubmissionId: null, reliabilityFlags: [] });
+		db.update(placementResults).set({ writingStatus: 'queued', reliabilityFlags: ['many_false_alarms'] }).where(eq(placementResults.id, row.id)).run();
+		expect(db.select().from(placementResults).get()).toEqual({ ...row, writingStatus: 'queued', reliabilityFlags: ['many_false_alarms'] });
+	});
+
+	it('placement_attempts allows one in progress', () => {
+		const db = createTestDb();
+		const start = { startedAt: new Date(1_800_000_000_000), stateJson: {} };
+		const first = db.insert(placementAttempts).values(start).returning().get();
+		expect(first).toMatchObject({ status: 'in_progress', part: 'A', resultId: null });
+		expect(() => db.insert(placementAttempts).values(start).run()).toThrow(/UNIQUE/);
+		db.update(placementAttempts).set({ status: 'abandoned' }).where(eq(placementAttempts.id, first.id)).run();
+		db.insert(placementAttempts).values(start).run();
+		expect(() => db.insert(placementAttempts).values({ ...start, status: 'abandoned', part: 'Z' as 'A' }).run()).toThrow(/CHECK/);
 	});
 
 	it('cards and review logs store every ts-fsrs field losslessly', () => {

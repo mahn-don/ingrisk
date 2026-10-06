@@ -4,6 +4,7 @@ import { cacheRepo } from '../db/repositories/cache.ts';
 import { clozeItemsRepo } from '../db/repositories/cloze-items.ts';
 import type { UsageEntry } from '../db/repositories/llm-calls.ts';
 import { profileRepo } from '../db/repositories/profile.ts';
+import { type QueuedGradingSummary, gradeQueuedWritings } from '../grading/queued.ts';
 import type { LlmDeps } from '../llm/client.ts';
 import { type RunBudget, startBudget } from './budget.ts';
 import { buildCloze } from './cloze/build.ts';
@@ -104,16 +105,22 @@ export interface PrefetchSummary extends GenSummary {
 	steps: string[];
 	budgetExhausted: boolean;
 	llm: { calls: number; usage: UsageEntry[] };
+	/** Queued writing submissions graded first (learner-facing, so before the stock). */
+	writing: QueuedGradingSummary;
 }
 
 const oversample = (n: number) => Math.ceil(n * OVERSAMPLE);
 
-/** Fill the stock: compute the shortfall, then run cloze, injected drills, LLM drills and reading. */
+/**
+ * Grade the queued writings, then fill the stock: compute the shortfall, then run cloze, injected
+ * drills, LLM drills and reading. All on one call budget.
+ */
 export async function prefetch(options: { maxCalls: number }, deps: PrefetchDeps): Promise<PrefetchSummary> {
 	const db = deps.llm.db;
 	const budget: RunBudget = startBudget(db, deps.llm.now(), { maxCalls: options.maxCalls, dailyCap: deps.dailyCap });
 	const shortfall = computeShortfall(readStockLevels(db), deps.targets);
-	const summary: PrefetchSummary = { ...emptySummary(), shortfall, steps: [], budgetExhausted: false, llm: { calls: 0, usage: [] } };
+	const writing = await gradeQueuedWritings({ maxCalls: options.maxCalls, budget }, { llm: deps.llm, dailyCap: deps.dailyCap });
+	const summary: PrefetchSummary = { ...emptySummary(), shortfall, steps: [], budgetExhausted: false, llm: { calls: 0, usage: [] }, writing };
 	const { context } = deps;
 
 	for (const step of ['cloze', 'drill-injected', 'drill-llm', 'reading'] as const) {

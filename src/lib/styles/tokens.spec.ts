@@ -42,7 +42,9 @@ const TEXT_PAIRS: [string, string][] = [
 	['incorrect', 'incorrect-soft'],
 	['text', 'incorrect-soft'],
 	['warning', 'surface'],
-	['warning', 'warning-soft']
+	['warning', 'warning-soft'],
+	['text', 'warning-soft'],
+	['correct', 'bg']
 ];
 /** Boundaries of interactive controls (WCAG 1.4.11: 3:1). */
 const CONTROL_PAIRS: [string, string][] = [

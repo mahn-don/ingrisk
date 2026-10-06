@@ -34,6 +34,9 @@ export function writingRepo(db: DbOrTx) {
 				.returning()
 				.get();
 		},
+		byId(id: number): WritingSubmission | undefined {
+			return db.select().from(writingSubmissions).where(eq(writingSubmissions.id, id)).get();
+		},
 		/** Submissions waiting to be graded, oldest first. */
 		queued(): WritingSubmission[] {
 			return db

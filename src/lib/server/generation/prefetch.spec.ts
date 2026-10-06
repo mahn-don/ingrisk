@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { llmCallsRepo } from '../db/repositories/llm-calls.ts';
 import { profileRepo } from '../db/repositories/profile.ts';
+import { writingRepo } from '../db/repositories/writing.ts';
 import { DailyCapError } from './budget.ts';
 import { DRILL_CODES } from './drills/build.ts';
 import { type StockLevels, bandsInRange, computeShortfall, orderCheapestFirst, prefetch, readStockLevels } from './prefetch.ts';
@@ -59,6 +60,15 @@ describe('prefetch', () => {
 		const levels = readStockLevels(fx.db);
 		expect(levels.reading.get(1)).toBe(1);
 		expect(levels.cloze.get(1)).toBeGreaterThanOrEqual(4);
+	});
+
+	it('grades queued writings before filling the stock, on the same budget', async () => {
+		const { fx, llm, context, requests } = cannedWorld();
+		writingRepo(fx.db).queue({ sessionId: null, prompt: 'Viết về gia đình.', userText: 'I have one sister.', submittedAt: new Date(0) });
+		const summary = await prefetch({ maxCalls: 2 }, { llm, context, dailyCap: 500 });
+		expect(summary.writing).toEqual({ graded: 1, failed: 0, remaining: 0 });
+		expect(requests[0].purpose).toBe('grade_writing');
+		expect(summary.llm.calls).toBe(2);
 	});
 
 	it('stops at maxCalls', async () => {

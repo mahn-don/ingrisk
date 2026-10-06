@@ -1,5 +1,32 @@
 import { getDb } from '#lib/server/db/client.js';
+import { placementRepo } from '#lib/server/db/repositories/placement.js';
+import { profileRepo } from '#lib/server/db/repositories/profile.js';
+import { gradeQueuedInBackground } from '#lib/server/placement/app.js';
+import { placementOverview } from '#lib/server/placement/engine.js';
 import { counts } from '#lib/server/srs/queue.js';
-import type { PageServerLoad } from './$types';
+import type { Actions, PageServerLoad } from './$types';
 
-export const load: PageServerLoad = () => ({ counts: counts(getDb(), new Date()) });
+export const load: PageServerLoad = () => {
+	const db = getDb();
+	// Queued writings (a placement graded late) are graded in the background, never awaited.
+	gradeQueuedInBackground();
+	const profile = profileRepo(db).get();
+	const overview = placementOverview(db);
+	return {
+		counts: counts(db, new Date()),
+		placement: {
+			...overview,
+			// Offered until a test is completed or the learner chose to start from the basics.
+			offer: !overview.completed && !overview.inProgress && profile.placementSkippedAt === null,
+			cefr: overview.completed ? (placementRepo(db).latestResult()?.cefr ?? null) : null
+		}
+	};
+};
+
+export const actions: Actions = {
+	/** "Bỏ qua, bắt đầu từ cơ bản": no test; start from band 1. */
+	skipPlacement: () => {
+		const now = new Date();
+		profileRepo(getDb()).update({ placementSkippedAt: now, knownBandCeiling: 1 }, now);
+	}
+};

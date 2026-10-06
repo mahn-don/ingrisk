@@ -3,6 +3,9 @@
 Phase details and prompts live in Part III of `docs/architecture.md`. One phase per session, one
 commit per phase, `npm run verify` green before committing.
 
+**Build order after Phase 6 (the owner's decision): 8 → 9 → 10 → 7 → 11.** The deploy moves after
+the features; the list below is in that order.
+
 - [x] **Phase 0 — Scaffold and guardrails:** a clean, verified skeleton showing a Vietnamese string from `messages/vi.ts`, with a hook that blocks committing secrets.
 - [x] **Phase 1 — Content data preparation:** a re-runnable `tool/` script producing the NGSL, Tatoeba EN–VI and pseudo-word assets in `src/lib/server/content/` (no app code). Pseudo-words reviewed by hand.
 - [x] **Phase 2 — Data layer:** Drizzle schema per Part II §3, migrations, intent-level repositories and in-memory SQLite tests.
@@ -11,8 +14,8 @@ commit per phase, `npm run verify` green before committing.
 - [x] **Phase 5a — Content import and the cloze pipeline:** idempotent content import with a blocklist, and a validated cloze pool (deterministic candidates, LLM distractors, rules, blind critic) with cost guards and a human eval sheet.
 - [x] **Phase 5b — Passages, error drills, grading and prefetch:** injected and LLM-written error drills and graded passages behind blind critics, live writing/translation grading, a static writing-prompt bank, and the locked, secret-guarded prefetch job.
 - [x] **Phase 6 — App shell and authentication:** hooks-level auth with server-side sessions and a login limiter, the tabbed shell with real card counts, a WCAG-checked light/dark theme with self-hosted fonts and shared components. Browser-only over HTTP: no PWA (amendment).
-- [ ] **Phase 7 — Deploy to the VPS:** systemd (Node on `0.0.0.0:3000`, plain HTTP), Litestream backup, cron, the deploy script and a runbook, with a proven backup restore.
-- [ ] **Phase 8 — Placement test:** the retakeable three-part placement flow with Elo-style estimation reported on CEFR/VSTEP/IELTS/TOEIC.
+- [x] **Phase 8 — Placement test:** the retakeable, resumable three-part placement (yes/no vocabulary staircase, adaptive Elo cloze, writing graded live or later) reported on CEFR/VSTEP/IELTS/TOEIC as estimates.
 - [ ] **Phase 9 — Session loop:** the time-budgeted daily session (Nhanh/Đọc/Viết) running client-side from cached content, with error mining.
 - [ ] **Phase 10 — Settings, stats, motivation:** provider management, settings, stats, and the gentle streak/weekly-goal motivation layer.
+- [ ] **Phase 7 — Deploy to the VPS:** systemd (Node on `0.0.0.0:3000`, plain HTTP), Litestream backup, cron, the deploy script and a runbook, with a proven backup restore.
 - [ ] **Phase 11 — Hardening:** eval fixtures, error/empty/offline states, migration tests, rate limiting and a bounded review pass.

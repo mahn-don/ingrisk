@@ -40,6 +40,7 @@ src/
       generation/        content import; generators + validation (cloze/, drills/, reading/), prefetch
       grading/           live writing and translation grading (no cache)
       cron/              cron endpoint logic (secret check, single-run lock)
+      placement/         placement test: staircase, Elo, combination (pure), engine, results
       auth/              sessions, cookie rules, login limiter, the public-path allowlist
       content/           generated JSON assets (NGSL, Tatoeba pairs, pseudo-words); built by
                          `npm run content:prepare`, never edited by hand. Exception:
@@ -59,7 +60,8 @@ deploy/                  systemd unit, Litestream config, deploy script, crontab
 ```
 
 Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e tests as `*.e2e.ts`
-(Playwright starts three preview servers: main, no password hash, and an isolated rate-limit one).
+(Playwright starts four preview servers: main, no password hash, an isolated rate-limit one, and
+placement with a seeded database and `LLM_CANNED=1`).
 SvelteKit 3 renamed `$app/environment` to `$app/env`.
 
 ## Commands
@@ -83,7 +85,8 @@ SvelteKit 3 renamed `$app/environment` to `$app/env`.
 | `npm run prefetch -- [--max-calls N] [--dry-run]` | Top up the stock (cloze, drills, passages), cheapest first; same as the cron endpoint |
 | `npm run llm:usage -- --days 7` | LLM calls and tokens per day × purpose × model |
 | `npm run auth:hash` | Prompt for the login password twice (hidden) and print `APP_PASSWORD_HASH` |
-| `npm run screenshots` | Login, Home, Stats, Settings, `/dev/components` at 390×844, light + dark, into `tmp/screens/` |
+| `npm run screenshots` | Login, Home, Stats, Settings, `/dev/components`, the placement test at 390×844, light + dark, into `tmp/screens/` |
+| `npm run test:seed -- --db PATH` | A throwaway test database: content plus a cloze pool built with the canned LLM |
 | `npm run db:generate` | Generate a SQL migration from `src/lib/server/db/schema.ts` (commit it) |
 | `npm run db:migrate` | Apply pending migrations to `DATABASE_PATH` (default `data/app.db`) |
 | `npm run db:studio` | Browse the database with Drizzle Studio |
@@ -126,7 +129,8 @@ SvelteKit 3 renamed `$app/environment` to `$app/env`.
 
 - All LLM output is validated with Zod locally; provider-side schema enforcement is never trusted alone.
 - Tests and `--dry-run` use a fake `fetch` (`llm/test-helpers.ts`, `generation/canned-llm.ts`),
-  never a live endpoint. Every generator runs on a budget (`generation/budget.ts`): `--max-calls`
+  never a live endpoint; e2e and screenshot servers set `LLM_CANNED=1` (refused when
+  `NODE_ENV=production`). Every generator runs on a budget (`generation/budget.ts`): `--max-calls`
   and `LLM_DAILY_CALL_CAP`. Every generated item passes rules and a blind critic.
 - Every CLI parses arguments with `tool/lib/cli.ts` (`parseArgs` strict, `--help` with an example).
 

@@ -53,15 +53,48 @@ const createdNow = sql`(cast(unixepoch('subsec') * 1000 as integer))`;
 
 // --- JSON column types --------------------------------------------------------------------------
 
-export interface PlacementSubscores {
-	vocab: number;
-	grammar: number;
-	reading: number;
-	writing: number | null;
+export const PLACEMENT_ATTEMPT_STATUSES = ['in_progress', 'completed', 'abandoned'] as const;
+export const PLACEMENT_PARTS = ['A', 'B', 'C', 'done'] as const;
+
+/** Accuracy on one kind of Part B item. */
+export interface PartScore {
+	correct: number;
+	total: number;
 }
 
-/** One answered placement item; Phase 8 fixes the exact shape. */
-export type PlacementLogEntry = Record<string, unknown>;
+export interface PlacementSubscores {
+	/** vocab_band from Part A (1-8). */
+	vocab: number;
+	/** Part A false-alarm rate (pseudo-words marked "known"). */
+	falseAlarmRate: number;
+	/** Part B lexical items; null when Part B was skipped. */
+	lexical: PartScore | null;
+	/** Part B grammar items (article, preposition, verb_form together); null when skipped. */
+	grammar: PartScore | null;
+	grammarByType: Partial<Record<'article' | 'preposition' | 'verb_form', PartScore>>;
+	/** CEFR of the graded writing sample; null until graded or when skipped. */
+	writing: (typeof CEFR_LEVELS)[number] | null;
+}
+
+/** One answered placement item. */
+export interface PlacementLogEntry {
+	part: 'A' | 'B';
+	/** Part A: the word; Part B: the cloze item id. */
+	item: string | number;
+	band: number;
+	shownAt: number;
+	answeredAt: number;
+	responseMs: number;
+	/** Part A: true = "Biết"; Part B: the chosen option. */
+	answer: boolean | string;
+	/** Part A: whether the answer was right (known real word, or unknown pseudo-word). */
+	correct: boolean;
+	/** Part A only. */
+	real?: boolean;
+}
+
+export const RELIABILITY_FLAGS = ['many_false_alarms', 'cloze_skipped'] as const;
+export type ReliabilityFlag = (typeof RELIABILITY_FLAGS)[number];
 
 /** One ranked error from writing feedback (Part II §5 WritingFeedback schema). */
 export interface WritingError {
@@ -145,6 +178,8 @@ export const userProfile = sqliteTable(
 		readingTheta: real('reading_theta'),
 		writingTheta: real('writing_theta'),
 		knownBandCeiling: integer('known_band_ceiling').notNull().default(1),
+		/** Set when the learner chose "start from the basics" instead of the placement test. */
+		placementSkippedAt: integer('placement_skipped_at', { mode: 'timestamp_ms' }),
 		updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(createdNow)
 	},
 	(t) => [
@@ -163,11 +198,41 @@ export const placementResults = sqliteTable(
 		cefr: text('cefr', { enum: CEFR_LEVELS }).notNull(),
 		subscoresJson: text('subscores_json', { mode: 'json' }).$type<PlacementSubscores>().notNull(),
 		itemLogJson: text('item_log_json', { mode: 'json' }).$type<PlacementLogEntry[]>().notNull(),
-		writingStatus: text('writing_status', { enum: PLACEMENT_WRITING_STATUSES }).notNull().default('none')
+		writingStatus: text('writing_status', { enum: PLACEMENT_WRITING_STATUSES }).notNull().default('none'),
+		/** Part A result (1-8); also the known_band_ceiling it sets. (migration 0006) */
+		vocabBand: integer('vocab_band').notNull().default(1),
+		/** Part B Elo ability; null when Part B was skipped. */
+		clozeTheta: real('cloze_theta'),
+		abilityBand: integer('ability_band').notNull().default(1),
+		writingSubmissionId: integer('writing_submission_id').references(() => writingSubmissions.id, { onDelete: 'set null' }),
+		reliabilityFlags: text('reliability_flags', { mode: 'json' }).$type<ReliabilityFlag[]>().notNull().default([])
 	},
 	(t) => [
 		check('placement_results_cefr', oneOf(t.cefr, CEFR_LEVELS)),
 		check('placement_results_writing_status', oneOf(t.writingStatus, PLACEMENT_WRITING_STATUSES))
+	]
+);
+
+/**
+ * A placement test in progress (or finished). The server holds the whole state, so a closed tab
+ * resumes where it was. At most one row is in_progress; starting another abandons it.
+ */
+export const placementAttempts = sqliteTable(
+	'placement_attempts',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		startedAt: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
+		finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
+		status: text('status', { enum: PLACEMENT_ATTEMPT_STATUSES }).notNull().default('in_progress'),
+		part: text('part', { enum: PLACEMENT_PARTS }).notNull().default('A'),
+		/** The engine's state (src/lib/server/placement/engine.ts). */
+		stateJson: text('state_json', { mode: 'json' }).$type<unknown>().notNull(),
+		resultId: integer('result_id').references(() => placementResults.id, { onDelete: 'set null' })
+	},
+	(t) => [
+		uniqueIndex('placement_attempts_one_in_progress').on(t.status).where(sql`${t.status} = 'in_progress'`),
+		check('placement_attempts_status', oneOf(t.status, PLACEMENT_ATTEMPT_STATUSES)),
+		check('placement_attempts_part', oneOf(t.part, PLACEMENT_PARTS))
 	]
 );
 
