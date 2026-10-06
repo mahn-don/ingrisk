@@ -2,8 +2,11 @@
 // session. Applied in src/hooks.server.ts, the single chokepoint (layouts do not run for
 // +server.ts endpoints, so a layout guard would leave /api open).
 
-/** Exact public paths. */
-const PUBLIC_EXACT = new Set(['/login', '/favicon.svg', '/robots.txt', '/_app/version.json', '/_app/env.js']);
+/**
+ * Exact public paths. /healthz (Phase 7) is public on purpose: deploy/deploy.sh and install.sh poll
+ * it after a restart, without a session. It answers only {ok, db, migrations} (src/lib/server/health.ts).
+ */
+const PUBLIC_EXACT = new Set(['/login', '/healthz', '/favicon.svg', '/robots.txt', '/_app/version.json', '/_app/env.js']);
 
 /** Public path prefixes. (Not all of /_app/: /_app/remote/ would be server code.) */
 const PUBLIC_PREFIXES = ['/api/cron/', '/_app/immutable/'];

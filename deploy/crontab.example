@@ -1,0 +1,18 @@
+# The deploy user's own crontab (no sudo): install with `crontab deploy/crontab.example` after
+# editing REPO and PATH below, or merge it into `crontab -e`. Check with `crontab -l`.
+#
+# Times are Asia/Ho_Chi_Minh via CRON_TZ. Check that this server's cron honours it
+# (`man 5 crontab | grep -A3 CRON_TZ`); if not, write the times in the system time zone instead
+# (`timedatectl`: on UTC, 03:00 / 03:30 in Vietnam are 20:00 / 20:30 the day before).
+CRON_TZ=Asia/Ho_Chi_Minh
+SHELL=/bin/bash
+# The repository checkout, and a PATH that finds node and npm (`dirname "$(command -v node)"`).
+REPO=/home/deploy/ingrisk
+PATH=/home/deploy/.nvm/versions/node/v24.11.1/bin:/usr/local/bin:/usr/bin:/bin
+
+# 03:00 — top up exercises and grade queued writing (POST /api/cron/prefetch with CRON_SECRET,
+# read from .env by deploy/prefetch.sh and never written here). Log: data/logs/prefetch.log
+0 3 * * * "$REPO/deploy/cron-run.sh" prefetch
+
+# 03:30 — database snapshot to data/backups/ (newest 14 kept). Log: data/logs/backup.log
+30 3 * * * "$REPO/deploy/cron-run.sh" backup

@@ -7,6 +7,8 @@ test('without APP_PASSWORD_HASH nothing is reachable', async ({ page, request })
 		expect(response.headers().location).toBe('/login');
 	}
 	expect((await request.get('/api/anything')).status()).toBe(503);
+	// The health check stays reachable: the server and its database are fine.
+	expect(await (await request.get('/healthz')).json()).toMatchObject({ ok: true, db: 'ok' });
 	await page.goto('/');
 	await expect(page).toHaveURL('/login');
 	await expect(page.getByRole('alert')).toContainText('Ứng dụng chưa được thiết lập');

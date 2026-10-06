@@ -1,0 +1,19 @@
+# OPTIONAL offsite replication with Litestream (https://litestream.io). Not installed by
+# deploy/install.sh: the nightly snapshots in data/backups/ are the default backup. See
+# plans/phase-07.md, "Optional: offsite replication".
+#
+# Copy to /etc/litestream.yml (root-owned, mode 644: it holds no secret) and give the credentials
+# to the litestream service through its environment (LITESTREAM_ACCESS_KEY_ID,
+# LITESTREAM_SECRET_ACCESS_KEY), e.g. a systemd drop-in with EnvironmentFile=/etc/litestream.env
+# (mode 600). The database must be in WAL mode (the app sets it).
+dbs:
+  - path: /home/deploy/ingrisk/data/app.db # the absolute DATABASE_PATH from .env
+    replicas:
+      - type: s3
+        # Any S3-compatible store: Cloudflare R2, Backblaze B2, AWS S3, ...
+        bucket: ${LITESTREAM_BUCKET}
+        path: silentenglish
+        endpoint: ${LITESTREAM_ENDPOINT} # e.g. https://<account>.r2.cloudflarestorage.com
+        region: auto
+        retention: 168h # keep a week of history
+        sync-interval: 10s
