@@ -6,11 +6,12 @@ import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { type Algorithm, hash } from '@node-rs/argon2';
 import { type Page, chromium } from '@playwright/test';
 import { parseCli, positiveInt } from './lib/cli.ts';
-import { seedTestDatabase } from './lib/test-content.ts';
+import type { SessionItem, StartResponse } from '../src/lib/session/types.ts';
+import { addDueCards, seedTestDatabase } from './lib/test-content.ts';
 
 const args = parseCli({
 	command: 'npm run screenshots --',
-	summary: 'Screenshot Login, Home, Stats, Settings, /dev/components and the placement test (390×844, light and dark) into tmp/screens/.',
+	summary: 'Screenshot Login, Home, Stats, Settings, /dev/components, the placement test and a session (390×844, light and dark) into tmp/screens/.',
 	usage: ['--port N           Port for the temporary dev server (default 5199); CHROMIUM_PATH picks a Chromium binary'],
 	example: '--port 5199',
 	options: { port: { type: 'string', default: '5199' } }
@@ -99,6 +100,50 @@ async function placement(page: Page, shot: (name: string, fullPage?: boolean) =>
 	await shot('placement-result', true);
 }
 
+/** A session: a choice item, a typing item, both feedback panels, the exit sheet and the end screen. */
+async function session(page: Page, shot: (name: string, fullPage?: boolean) => Promise<void>) {
+	addDueCards(`${OUT}/app.db`, 8);
+	const started = page.waitForResponse('**/api/session/start');
+	await page.goto(`${origin}/session?budget=5`);
+	const { items } = (await (await started).json()) as StartResponse & { items: SessionItem[] };
+	await page.getByTestId('session-item').waitFor();
+	const taken = new Set<string>();
+	const once = async (name: string) => {
+		if (taken.has(name)) return;
+		taken.add(name);
+		await shot(`session-${name}`);
+	};
+	for (let k = 0; k < items.length && taken.size < 4; k++) {
+		const id = Number(await page.getByTestId('session-item').getAttribute('data-card-id'));
+		const item = items.find((i) => i.cardId === id)!;
+		const card = page.getByTestId('session-item');
+		if (item.mode === 'typing') {
+			await card.getByLabel('Câu trả lời của bạn').fill(item.answer.slice(0, 3));
+			await once('typing');
+			await card.getByLabel('Câu trả lời của bạn').fill(item.answer);
+			await card.getByRole('button', { name: 'Kiểm tra' }).click();
+		} else {
+			await once('choice');
+			const right = !taken.has('correct');
+			const option = right ? item.answer : item.options!.find((o) => o !== item.answer)!;
+			await card.getByRole('button', { name: option === '—' ? '(không cần từ nào)' : option, exact: true }).click();
+			await page.getByTestId('feedback').waitFor();
+			await page.waitForTimeout(300); // the panel's slide
+			await once(right ? 'correct' : 'incorrect');
+		}
+		await page.getByTestId('feedback').waitFor();
+		await page.getByRole('button', { name: 'Tiếp', exact: true }).click();
+		await page.waitForFunction((old) => document.querySelector('[data-testid="session-item"]')?.getAttribute('data-card-id') !== String(old), id);
+	}
+	await page.getByTestId('session-exit').click();
+	await page.getByRole('alertdialog').waitFor();
+	await page.waitForTimeout(300);
+	await shot('session-exit');
+	await page.getByRole('button', { name: 'Kết thúc sớm và lưu' }).click();
+	await page.getByTestId('session-done').waitFor();
+	await shot('session-done');
+}
+
 await waitForServer();
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 const files: string[] = [];
@@ -129,6 +174,7 @@ for (const theme of ['light', 'dark'] as const) {
 }
 // Then the placement test in each theme; the second run's result shows the comparison.
 for (const [i, { page, shot }] of contexts.entries()) await placement(page, shot, i > 0);
+for (const { page, shot } of contexts) await session(page, shot);
 await browser.close();
 stop();
 for (const file of files) console.log(file);

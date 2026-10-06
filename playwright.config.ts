@@ -11,7 +11,8 @@ const SERVERS = {
 	main: { port: 4173, db: `${E2E_DIR}/main.db` },
 	unconfigured: { port: 4174, db: `${E2E_DIR}/unconfigured.db` },
 	rateLimit: { port: 4175, db: `${E2E_DIR}/rate-limit.db` },
-	placement: { port: 4176, db: `${E2E_DIR}/placement.db` }
+	placement: { port: 4176, db: `${E2E_DIR}/placement.db` },
+	session: { port: 4177, db: `${E2E_DIR}/session.db` }
 } as const;
 
 // The config is loaded again in every worker: only the main process resets the databases.
@@ -23,7 +24,7 @@ if (!isWorker) {
 const passwordHash = isWorker ? '' : hashSync(E2E_PASSWORD, { algorithm: 2 as Algorithm.Argon2id });
 const BUILT = `${E2E_DIR}/built`;
 const waitForBuild = `until [ -f ${BUILT} ]; do sleep 0.2; done;`;
-// The build is shared by four ports, so it must not bake an origin (vite.config.ts paths.origin):
+// The build is shared by five ports, so it must not bake an origin (vite.config.ts paths.origin):
 // it is built without ORIGIN, and vite preview takes the origin from each request.
 
 const server = (port: number, db: string, env: Record<string, string>, command: string) => ({
@@ -50,12 +51,20 @@ export default defineConfig({
 			SERVERS.placement.db,
 			{ APP_PASSWORD_HASH: passwordHash, LLM_CANNED: '1', NODE_ENV: 'test' },
 			`sh -c 'node tool/seed-test-db.ts --db ${SERVERS.placement.db} --per-band 40 && ${waitForBuild} npm run preview -- --port ${SERVERS.placement.port} --strictPort'`
+		),
+		// Sessions: seeded content, no LLM at all (a session never calls one).
+		server(
+			SERVERS.session.port,
+			SERVERS.session.db,
+			{ APP_PASSWORD_HASH: passwordHash },
+			`sh -c 'node tool/seed-test-db.ts --db ${SERVERS.session.db} --per-band 30 && ${waitForBuild} npm run preview -- --port ${SERVERS.session.port} --strictPort'`
 		)
 	],
 	projects: [
 		{ name: 'main', testMatch: /auth\.e2e\.ts$/, use: { baseURL: `http://localhost:${SERVERS.main.port}` } },
 		{ name: 'unconfigured', testMatch: /unconfigured\.e2e\.ts$/, use: { baseURL: `http://localhost:${SERVERS.unconfigured.port}` } },
 		{ name: 'rate-limit', testMatch: /rate-limit\.e2e\.ts$/, use: { baseURL: `http://localhost:${SERVERS.rateLimit.port}` } },
-		{ name: 'placement', testMatch: /placement\.e2e\.ts$/, use: { baseURL: `http://localhost:${SERVERS.placement.port}` } }
+		{ name: 'placement', testMatch: /placement\.e2e\.ts$/, use: { baseURL: `http://localhost:${SERVERS.placement.port}` } },
+		{ name: 'session', testMatch: /session\.e2e\.ts$/, use: { baseURL: `http://localhost:${SERVERS.session.port}` } }
 	]
 });

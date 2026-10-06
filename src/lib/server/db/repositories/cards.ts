@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, lte, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, lte, min, ne, sql } from 'drizzle-orm';
 import type { DbOrTx } from '../client.ts';
 import { cards } from '../schema.ts';
 
@@ -50,6 +50,28 @@ export function cardsRepo(db: DbOrTx) {
 		 */
 		insertIfAbsent(card: NewCard): CardRow | undefined {
 			return db.insert(cards).values(card).onConflictDoNothing().returning().get();
+		},
+		byIds(ids: readonly number[]): CardRow[] {
+			if (ids.length === 0) return [];
+			return db.select().from(cards).where(inArray(cards.id, [...ids])).all();
+		},
+		/** The earliest due time among introduced (not New) cards; null when there are none. */
+		earliestIntroducedDue(): Date | null {
+			const row = db.select({ due: min(cards.due) }).from(cards).where(ne(cards.state, 'New')).get();
+			return row?.due ?? null;
+		},
+		/** Cloze item ids that already have a card. */
+		clozeItemIdsWithCards(): Set<number> {
+			const rows = db.select({ id: cards.clozeItemId }).from(cards).where(isNotNull(cards.clozeItemId)).all();
+			return new Set(rows.map((r) => r.id!));
+		},
+		/** Lexemes that already have a card. */
+		lexemeIdsWithCards(): Set<number> {
+			const rows = db.select({ id: cards.lexemeId }).from(cards).where(isNotNull(cards.lexemeId)).all();
+			return new Set(rows.map((r) => r.id!));
+		},
+		setPromptMode(id: number, mode: CardRow['promptMode']): void {
+			db.update(cards).set({ promptMode: mode }).where(and(eq(cards.id, id), ne(cards.promptMode, mode))).run();
 		},
 		/** Persist a card's updated scheduling state (and prompt mode). */
 		save(card: CardRow): CardRow {
