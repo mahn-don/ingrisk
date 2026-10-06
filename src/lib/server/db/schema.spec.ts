@@ -169,6 +169,37 @@ describe('migrations', () => {
 		}
 	});
 
+	it('adds the session columns (0006 -> 0007) without unlinking writing submissions', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'silentenglish-mig7-'));
+		try {
+			const full = migrationsFolder();
+			const partial = join(dir, 'migrations');
+			mkdirSync(join(partial, 'meta'), { recursive: true });
+			const journal = JSON.parse(readFileSync(join(full, 'meta', '_journal.json'), 'utf8'));
+			journal.entries = journal.entries.filter((e: { tag: string }) => e.tag < '0007');
+			for (const entry of journal.entries) copyFileSync(join(full, `${entry.tag}.sql`), join(partial, `${entry.tag}.sql`));
+			writeFileSync(join(partial, 'meta', '_journal.json'), JSON.stringify(journal));
+
+			const db = createDb(':memory:');
+			migrate(db, partial);
+			const session = db.$client
+				.prepare("insert into sessions (client_session_id, started_at, budget_min, shape, items_done) values ('old', 1, 8, 'write', 3)")
+				.run().lastInsertRowid;
+			db.$client.prepare("insert into writing_submissions (session_id, prompt, user_text, submitted_at) values (?, 'p', 't', 1)").run(session);
+			migrate(db, full);
+			expect(db.$client.prepare('select session_id from writing_submissions').pluck().get()).toBe(Number(session));
+			expect(db.select().from(sessions).get()).toMatchObject({ clientSessionId: 'old', status: 'finished', servedJson: [], finishedAt: null, summaryJson: null });
+			expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+			// One session in progress at most; the status is checked.
+			const start = db.$client.prepare("insert into sessions (client_session_id, started_at, budget_min, shape, status) values (?, 1, 8, 'quick', ?)");
+			start.run('a', 'in_progress');
+			expect(() => start.run('b', 'in_progress')).toThrow(/UNIQUE/);
+			expect(() => start.run('c', 'paused')).toThrow(/CHECK/);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it('opens file databases with WAL and the other pragmas', () => {
 		const dir = mkdtempSync(join(tmpdir(), 'silentenglish-db-'));
 		try {

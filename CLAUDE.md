@@ -41,6 +41,7 @@ src/
       grading/           live writing and translation grading (no cache)
       cron/              cron endpoint logic (secret check, single-run lock)
       placement/         placement test: staircase, Elo, combination (pure), engine, results
+      session/           session composition (pure rules + card creation), start/finish, Home counts
       auth/              sessions, cookie rules, login limiter, the public-path allowlist
       content/           generated JSON assets (NGSL, Tatoeba pairs, pseudo-words); built by
                          `npm run content:prepare`, never edited by hand. Exception:
@@ -48,6 +49,7 @@ src/
     components/          shared Svelte components (gallery: /dev/components, dev only)
     styles/              colour tokens (WCAG-checked by a test) and self-hosted font faces
     messages/vi.ts       every user-facing string (export `t`), grouped by screen
+    session/             shared by server and client: answer check, auto-rating, API types
   routes/
     (app)/               login-protected route group
     login/
@@ -60,8 +62,8 @@ deploy/                  systemd unit, Litestream config, deploy script, crontab
 ```
 
 Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e tests as `*.e2e.ts`
-(Playwright starts four preview servers: main, no password hash, an isolated rate-limit one, and
-placement with a seeded database and `LLM_CANNED=1`).
+(Playwright starts five preview servers: main, no password hash, an isolated rate-limit one,
+placement with a seeded database and `LLM_CANNED=1`, and session with a seeded database).
 SvelteKit 3 renamed `$app/environment` to `$app/env`.
 
 ## Commands
@@ -85,7 +87,7 @@ SvelteKit 3 renamed `$app/environment` to `$app/env`.
 | `npm run prefetch -- [--max-calls N] [--dry-run]` | Top up the stock (cloze, drills, passages), cheapest first; same as the cron endpoint |
 | `npm run llm:usage -- --days 7` | LLM calls and tokens per day × purpose × model |
 | `npm run auth:hash` | Prompt for the login password twice (hidden) and print `APP_PASSWORD_HASH` |
-| `npm run screenshots` | Login, Home, Stats, Settings, `/dev/components`, the placement test at 390×844, light + dark, into `tmp/screens/` |
+| `npm run screenshots` | Login, Home, Stats, Settings, `/dev/components`, the placement test and a session at 390×844, light + dark, into `tmp/screens/` |
 | `npm run test:seed -- --db PATH` | A throwaway test database: content plus a cloze pool built with the canned LLM |
 | `npm run db:generate` | Generate a SQL migration from `src/lib/server/db/schema.ts` (commit it) |
 | `npm run db:migrate` | Apply pending migrations to `DATABASE_PATH` (default `data/app.db`) |

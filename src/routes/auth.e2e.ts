@@ -45,7 +45,7 @@ test.describe('login and logout', () => {
 		await page.getByRole('link', { name: 'Hôm nay' }).click();
 		await expect(page.getByTestId('count-due')).toHaveText('0');
 		await expect(page.getByTestId('count-new')).toHaveText('0');
-		await expect(page.getByRole('button', { name: 'Bắt đầu học' })).toBeDisabled();
+		await expect(page.getByRole('link', { name: 'Bắt đầu học' })).toHaveAttribute('href', '/session?budget=8');
 	});
 
 	test('a hostile next falls back to /', async ({ page }) => {
@@ -76,9 +76,10 @@ test.describe('login and logout', () => {
 });
 
 test.describe('shell', () => {
-	test('session is full screen, with an exit and no tab bar', async ({ page }) => {
+	test('session is full screen, with an exit and no tab bar; without content it says so', async ({ page }) => {
 		await login(page, '/session');
 		await expect(page.getByRole('navigation')).toHaveCount(0);
+		await expect(page.getByTestId('session-empty')).toContainText('Chưa có nội dung để học');
 		await page.getByRole('link', { name: 'Thoát buổi học' }).click();
 		await expect(page).toHaveURL('/');
 		await expect(page.getByRole('navigation', { name: 'Điều hướng chính' })).toBeVisible();

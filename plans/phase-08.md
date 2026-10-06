@@ -5,7 +5,7 @@ staircase, adaptive cloze and an optional writing sample. Results are reported o
 IELTS and TOEIC as estimates. The algorithm as built is in `docs/architecture.md` Part I §7. The
 owner's Phase 8 prompt refines the doc's Phase 8 section, and where they differ the prompt wins.
 
-**Build order changed:** 8 → 9 → 10 → 7 → 11 (deploy after the features).
+**Build order changed:** 8 → 9 → 10 → 7 → 11 (deploy after the features); Phase 9 was later split into 9a and 9b.
 
 ## Modules
 

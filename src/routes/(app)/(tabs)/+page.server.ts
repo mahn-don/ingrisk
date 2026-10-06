@@ -3,7 +3,8 @@ import { placementRepo } from '#lib/server/db/repositories/placement.js';
 import { profileRepo } from '#lib/server/db/repositories/profile.js';
 import { gradeQueuedInBackground } from '#lib/server/placement/app.js';
 import { placementOverview } from '#lib/server/placement/engine.js';
-import { counts } from '#lib/server/srs/queue.js';
+import { settingsRepo } from '#lib/server/db/repositories/settings.js';
+import { homeCounts } from '#lib/server/session/counts.js';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = () => {
@@ -13,7 +14,8 @@ export const load: PageServerLoad = () => {
 	const profile = profileRepo(db).get();
 	const overview = placementOverview(db);
 	return {
-		counts: counts(db, new Date()),
+		counts: homeCounts(db, new Date()),
+		defaultBudget: settingsRepo(db).get().defaultSessionBudget,
 		placement: {
 			...overview,
 			// Offered until a test is completed or the learner chose to start from the basics.

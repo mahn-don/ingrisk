@@ -171,6 +171,28 @@ Every session: warm-up (3–4 due cloze items) → review block (due cards, rate
 
 Read and Write alternate across days. If a graded writing submission has unseen feedback, show it at the start of the session and prefer Read that day.
 
+**Composition as built (Phase 9a, quick shape only; `src/lib/server/session/compose.ts`).**
+- **Size.** Item count = `round(budget_min × 60 / 20)`, about 20 s per item, capped at 30. The budget is 5, 8 or 10 minutes, chosen on Home; the default comes from settings.
+- **Reviews.** Due cloze cards from the Phase 3 queue, up to the item count.
+- **New cards.**
+  - **Allowance.** At most `new_cards_per_day` per learning day, minus the cards already introduced that day. Cards left New by an abandoned session are served first.
+  - **Making new cards.** Further new cards come from validated `cloze_items` without a card, at `level_band ≤ known_band_ceiling + 1`, lowest band first. About half are lexical items (lexemes without a card first); articles, prepositions and verb forms share the rest. The cards are created when the session is composed.
+- **Order.**
+  1. The 3 due cards with the highest retrievability open the session (an easy start).
+  2. Then the other due cards, most overdue first.
+  3. One new card after every 3 reviews.
+  4. The order is then repaired so that no two items from one sentence are adjacent and no gap type appears more than 3 times in a row.
+- **Stock names.** At most 30% of items come from sentences with stock names (Tom, Mary).
+- **Mode.**
+  - `choice` while the card is New or Learning, or its stability is under 7 days; `typing` after that, decided per card.
+  - Article gaps are always `choice`.
+  - Typing accepts one typo (Levenshtein distance 1) in answers of 5+ letters, but rates it Hard and shows the spelling. The hint reveals the first letter and also gives Hard.
+- **Rating.** Auto-rating as in §2. The feedback panel shows the next interval for that rating and lets the learner change it (Quên / Khó / Được / Dễ).
+- **One request in, one request out.**
+  - **Start** returns every item, with the answer and the four rating intervals, and stores the served items.
+  - **Finish** applies all reviews and records the session in one transaction. Each review time is the session start plus the answer's offset, never the device clock. A repeated finish with the same client id returns the stored summary.
+- **End screen.** Items answered, accuracy, words strengthened (reviewed cards whose stability rose; first reviews excluded), new cards, the next review time and today's study minutes. Streaks and the weekly goal are Phase 10.
+
 **Error mining:** every error the LLM identifies becomes a candidate card tagged with its taxonomy code, so the review pool gradually targets the learner's real weaknesses.
 
 **Later modes** (behind settings, not in v1): pure cloze sprint; text-chat tutor with inline correction; dedicated error-correction drills.
@@ -321,7 +343,14 @@ review_logs(id, card_id → cards ON DELETE RESTRICT,
 -- A card with reviews cannot be deleted, so the review history is never lost.
 
 sessions(id, client_session_id UNIQUE, started_at, ended_at, budget_min, shape,
-         items_done, streak_after)
+         items_done, streak_after, status, served_json, finished_at, summary_json)
+-- (last four: migration 0007) status ∈ in_progress | finished | abandoned, at most one
+-- in_progress (partial unique index; a new start abandons it). served_json: the items served
+-- ({cardId, mode, isNew}), which finish checks results against. summary_json: the finish summary,
+-- returned again on a repeated finish. client_session_id holds a server placeholder
+-- ("pending:<uuid>") until the client's id arrives with the results. Rows from before 0007 read
+-- as finished. 0007 is hand-written (ADD COLUMN with a column CHECK): drizzle-kit's table rebuild
+-- would have fired ON DELETE SET NULL on writing_submissions.session_id.
 
 generated_cache(id, kind, params_hash, content_hash UNIQUE, level_band,
                 payload_json, model, created_at, validated, validation_notes,
@@ -343,7 +372,7 @@ grammar_topics(id, code UNIQUE, name_vi, name_en, l1_interference)
 -- seeded with the 10 codes of Part I §6.
 ```
 
-Indexes: `cards(due)`, `placement_attempts(status) WHERE status = 'in_progress'` (unique), `review_logs(card_id, review)`, `sentences(blocked, level_band)`, `cloze_items(validated, gap_type, level_band)`, `cloze_items(sentence_id)`, `llm_calls(created_at)`, `collocations(lexeme_id)`, `generated_cache(kind, params_hash)`, `generated_cache(kind, validated, served_at)`, `writing_submissions(status)`, plus the unique indexes above.
+Indexes: `cards(due)`, `sessions(finished_at)`, `sessions(status) WHERE status = 'in_progress'` (unique), `placement_attempts(status) WHERE status = 'in_progress'` (unique), `review_logs(card_id, review)`, `sentences(blocked, level_band)`, `cloze_items(validated, gap_type, level_band)`, `cloze_items(sentence_id)`, `llm_calls(created_at)`, `collocations(lexeme_id)`, `generated_cache(kind, params_hash)`, `generated_cache(kind, validated, served_at)`, `writing_submissions(status)`, plus the unique indexes above.
 
 Enumerations: `kind` ∈ cloze | translate | grammar | reading | error (cards and generated_cache); `status` ∈ queued | scored | failed; `wire_format` ∈ openai | anthropic; `structured_mode` ∈ json_schema | tool | json_prompt; `shape` ∈ quick | read | write; `writing_status` ∈ none | queued | scored; `feedback_mode` ∈ direct | indirect; `prompt_mode` ∈ choice | typing; `state` ∈ New | Learning | Review | Relearning and `rating` ∈ Manual | Again | Hard | Good | Easy (ts-fsrs `State` and `Rating` names); CEFR columns ∈ A1 … C2; `code` ∈ the taxonomy codes; `gap_type` ∈ lexical | article | preposition | verb_form.
 
@@ -534,11 +563,11 @@ Vietnamese is a small language on Tatoeba: expect a few thousand usable EN–VI 
 - **One commit per phase**, small diffs, secret scanning on.
 - **Review subagents** get a bounded question: "Compared with the phase plan, report only correctness defects and unmet requirements. No style comments, no architectural suggestions, no new features."
 
-### 12 phases (0–11; Phase 5 is split into 5a and 5b)
+### 12 phases (0–11; Phases 5 and 9 are each split in two)
 
 Dependency order: data and engines first, app shell in the middle, features last.
 
-**Build order (changed after Phase 6, the owner's decision): 8 → 9 → 10 → 7 → 11.** The features (placement, session loop, settings) come before the deploy, which now follows Phase 10, and hardening stays last. The phase numbers and sections below are unchanged; `plans/roadmap.md` lists the phases in build order.
+**Build order (changed after Phase 6, the owner's decision): 8 → 9a → 9b → 10 → 7 → 11.** The features (placement, session loop, settings) come before the deploy, which now follows Phase 10, and hardening stays last. The phase numbers and sections below are unchanged; `plans/roadmap.md` lists the phases in build order.
 
 ---
 
@@ -785,6 +814,18 @@ Deploy early, while the app is nearly empty. Infrastructure problems are much ch
 ---
 
 #### Phase 9 — Session loop
+
+**Split (the owner's decision):**
+- **9a (done): the session engine and the daily cloze review loop.**
+  - Composition, the start/finish API, the shared answer check, the `/session` screen, and Home's start button with budget chips.
+  - Only the **Nhanh** shape is built, so after 9a the app is usable daily for quick reviews.
+  - Details are in Part I §8 and `plans/phase-09a.md`.
+- **9b: the rest of this section.**
+  - **Anchors:** Đọc (a graded passage + 2 questions), Viết (a writing task or a VI→EN translation) and error-correction drills.
+  - **Rotation:** Đọc/Viết on alternating days, and degrading to Nhanh with a prefetch prompt when stock is short.
+  - **Unseen feedback:** shown at the start of a session (placement writings included), which makes that day prefer Đọc.
+  - **Error mining:** each AI-returned error becomes a card tagged with its `topic_code`. Each error card gets its **own `sentences` row** (`source = 'user_error'`); otherwise the cards unique index would merge every error card of a topic into one (`plans/backlog.md`).
+  - **Writing grading:** gains an `on_topic` / task-relevance criterion, because the Phase 8 screenshots showed an off-topic answer graded A2.
 
 > Implement the session engine per Part I §8 of `docs/architecture.md`.
 >

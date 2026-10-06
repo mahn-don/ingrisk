@@ -12,6 +12,10 @@
 		{ label: t.home.learning, value: data.counts.learning, testid: 'count-learning' }
 	]);
 	let skipping = $state(false);
+	// Budget chips: 5 / 8 / 10 minutes, plus the settings default if it is another value.
+	const budgets = $derived([...new Set([5, 8, 10, data.defaultBudget])].sort((a, b) => a - b));
+	// svelte-ignore state_referenced_locally
+	let budget = $state(data.defaultBudget);
 </script>
 
 <svelte:head>
@@ -72,7 +76,19 @@
 <p class="mt-6 text-muted">{t.home.tagline}</p>
 
 <!-- The primary action sits low, in the thumb zone. -->
-<div class="mt-auto flex flex-col gap-2 pt-8">
-	<Button variant="primary" full disabled aria-describedby="start-hint">{t.home.start}</Button>
-	<p id="start-hint" class="text-center text-xs text-muted">{t.home.startHint}</p>
+<div class="mt-auto flex flex-col gap-3 pt-8">
+	<fieldset class="flex items-center justify-center gap-2">
+		<legend class="sr-only">{t.home.budget}</legend>
+		{#each budgets as minutes (minutes)}
+			<button
+				type="button"
+				class="min-h-10 rounded-full border-2 px-4 text-sm font-medium {budget === minutes
+					? 'border-primary bg-primary-soft font-semibold text-primary'
+					: 'border-control bg-surface text-text'}"
+				aria-pressed={budget === minutes}
+				onclick={() => (budget = minutes)}>{fill(t.home.budgetMinutes, { n: minutes })}</button
+			>
+		{/each}
+	</fieldset>
+	<Button variant="primary" full href="/session?budget={budget}">{t.home.start}</Button>
 </div>
