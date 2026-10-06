@@ -55,6 +55,16 @@ export function appLlmDeps(db: DbOrTx = getDb(), env: Env = process.env): LlmDep
 	return { ...defaultTransportDeps(), db, env: {}, now: () => new Date(), fetch: canned.fetch };
 }
 
+/**
+ * LLM deps for "Kiểm tra kết nối" on a chosen provider. Canned mode answers with the canned fetch
+ * but reads keys from the real environment, so a provider whose key variable is unset fails as it
+ * would live (the key never leaves the process: the fetch is fake).
+ */
+export function providerTestDeps(db: DbOrTx = getDb(), env: Env = process.env): LlmDeps {
+	if (!cannedLlmEnabled(env)) return { ...defaultTransportDeps(), db, env, now: () => new Date() };
+	return { ...appLlmDeps(db, env), env };
+}
+
 /** Whether an LLM call can be attempted at all: an active provider exists, or canned mode. */
 export const llmConfigured = (db: DbOrTx = getDb(), env: Env = process.env) =>
 	cannedLlmEnabled(env) || providersRepo(db).active() !== undefined;

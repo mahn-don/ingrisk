@@ -2,7 +2,9 @@
 	import { enhance } from '$app/forms';
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
+	import ProgressBar from '#lib/components/ProgressBar.svelte';
 	import { fill } from '#lib/format.js';
+	import { describeInterval } from '#lib/session/interval.js';
 	import { t } from '#lib/messages/vi.js';
 	import { defaultShape, shapeOptions } from '#lib/session/shape.js';
 	import type { SessionShape } from '#lib/session/types.js';
@@ -24,6 +26,11 @@
 	const options = $derived(shapeOptions(context));
 	const shape = $derived(picked !== null && options.some((o) => o.shape === picked && o.available) ? picked : defaultShape(context));
 	const shapeName = (s: SessionShape) => t.session.shapes[s];
+	/** "in 3 hours", "in 2 days". */
+	const nextReviewWhen = (at: number, now: number) => {
+		const { value, unit } = describeInterval(at - now);
+		return fill(t.home.todayIn, { span: fill(t.session.units[unit], { n: String(value).replace('.', ',') }) });
+	};
 </script>
 
 <svelte:head>
@@ -81,7 +88,27 @@
 	{/each}
 </ul>
 
-<p class="mt-6 text-muted">{t.home.tagline}</p>
+<section class="mt-4 rounded-2xl border border-border bg-surface p-4" aria-labelledby="today-title" data-testid="today-card">
+	<h2 id="today-title" class="sr-only">{t.home.todayTitle}</h2>
+	<div class="flex items-start justify-between gap-3">
+		<p class="flex items-baseline gap-2">
+			<span class="text-3xl font-bold tabular-nums" data-testid="today-streak">{data.today.streak.current}</span>
+			<span class="font-medium">{t.home.todayStreak}</span>
+		</p>
+		<p class="rounded-full bg-surface-2 px-3 py-1 text-sm text-muted" data-testid="today-freezes">{fill(t.home.todayFreezes, { n: data.today.streak.freezesBanked })}</p>
+	</div>
+	<p class="mt-2 text-sm" data-testid="today-week">{fill(t.home.todayWeek, { n: data.today.thisWeek.studiedDays, goal: data.today.thisWeek.goal })}</p>
+	<div class="mt-1"><ProgressBar value={Math.min(data.today.thisWeek.studiedDays, data.today.thisWeek.goal)} max={data.today.thisWeek.goal} label={t.stats.weekTitle} /></div>
+	<p class="mt-3 text-sm text-muted" data-testid="today-next">
+		{#if data.today.nextReviewAt === null}{t.home.todayNoReview}{:else if data.today.nextReviewAt <= data.today.now}{t.home.todayNextNow}{:else}{fill(
+				t.home.todayNextReview,
+				{ when: nextReviewWhen(data.today.nextReviewAt, data.today.now) }
+			)}{/if}
+	</p>
+	{#if data.today.minedWaiting > 0}
+		<p class="mt-1 text-sm font-medium text-warning" data-testid="today-mined">{fill(t.home.todayMined, { n: data.today.minedWaiting })}</p>
+	{/if}
+</section>
 
 <!-- The primary action sits low, in the thumb zone. -->
 <div class="mt-auto flex flex-col gap-3 pt-8">

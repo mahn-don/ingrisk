@@ -44,6 +44,20 @@ export function providersRepo(db: DbOrTx) {
 				.returning()
 				.get();
 		},
+		insert(input: ProviderInput): Provider {
+			return db.insert(llmProviders).values(input).returning().get();
+		},
+		/** Change a provider's configuration (not its fallback flag: see setFallback). */
+		update(id: number, input: Omit<ProviderInput, 'isFallback'>): Provider | undefined {
+			return db.update(llmProviders).set(input).where(eq(llmProviders.id, id)).returning().get();
+		},
+		/** Make `id` the only fallback provider (null: none). */
+		setFallback(id: number | null): void {
+			db.transaction((tx) => {
+				tx.update(llmProviders).set({ isFallback: false }).where(eq(llmProviders.isFallback, true)).run();
+				if (id !== null) tx.update(llmProviders).set({ isFallback: true }).where(eq(llmProviders.id, id)).run();
+			});
+		},
 		/** Delete a provider; settings.active_provider_id falls back to NULL. Returns whether one was deleted. */
 		remove(id: number): boolean {
 			return db.delete(llmProviders).where(eq(llmProviders.id, id)).run().changes > 0;

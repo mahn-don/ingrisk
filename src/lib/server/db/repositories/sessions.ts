@@ -101,6 +101,16 @@ export function sessionsRepo(db: DbOrTx) {
 				.where(and(eq(sessions.status, 'finished'), gte(sessions.finishedAt, from)))
 				.orderBy(asc(sessions.finishedAt))
 				.all();
+		},
+		/** Every finished session: when, how many items, how long (the progress history). */
+		finishedHistory(): { finishedAt: Date; itemsDone: number; studyMs: number }[] {
+			return db
+				.select({ finishedAt: sessions.finishedAt, endedAt: sessions.endedAt, startedAt: sessions.startedAt, itemsDone: sessions.itemsDone, summary: sessions.summaryJson })
+				.from(sessions)
+				.where(eq(sessions.status, 'finished'))
+				.orderBy(asc(sessions.id))
+				.all()
+				.map((r) => ({ finishedAt: r.finishedAt ?? r.endedAt ?? r.startedAt, itemsDone: r.itemsDone, studyMs: r.summary?.studyMs ?? 0 }));
 		}
 	};
 }

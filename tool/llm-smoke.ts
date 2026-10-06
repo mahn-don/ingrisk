@@ -1,10 +1,8 @@
 // Manual smoke test against a real provider (never run in CI): one tiny structured call.
-import { z } from 'zod';
 import { getDb } from '../src/lib/server/db/client.ts';
-import { llmCallsRepo } from '../src/lib/server/db/repositories/llm-calls.ts';
 import { providersRepo } from '../src/lib/server/db/repositories/providers.ts';
-import { defaultLlmDeps, generateStructured } from '../src/lib/server/llm/client.ts';
-import { LlmError } from '../src/lib/server/llm/errors.ts';
+import { defaultLlmDeps } from '../src/lib/server/llm/client.ts';
+import { smokeTest } from '../src/lib/server/llm/smoke.ts';
 import { parseCli } from './lib/cli.ts';
 
 const values = parseCli({
@@ -31,34 +29,12 @@ if (provider.envKeyName !== null && !process.env[provider.envKeyName]) {
 	process.exit(1);
 }
 
-const Word = z.object({
-	word: z.string(),
-	cefr: z.enum(['A1', 'A2', 'B1', 'B2', 'C1', 'C2']),
-	vi_gloss: z.string()
-});
-
-const started = performance.now();
-const since = new Date(Date.now() - 1000);
-try {
-	const result = await generateStructured(
-		{
-			purpose: 'smoke',
-			system: 'You are a concise English-Vietnamese lexicographer.',
-			user: 'Give the CEFR level of the English word "borrow" and a short Vietnamese gloss.',
-			schema: Word,
-			maxTokens: 300,
-			providerId: provider.id,
-			fallback: false
-		},
-		{ ...defaultLlmDeps(), db }
-	);
-	const latency = Math.round(performance.now() - started);
-	console.log(`provider: ${provider.name} (${provider.wireFormat}, ${provider.structuredMode}), model: ${result.model}`);
-	console.log('result:', JSON.stringify(result.data, null, 2));
-	console.log(`usage: ${result.usage.inputTokens} input + ${result.usage.outputTokens} output tokens`);
-	console.log(`generations: ${result.attempts}, HTTP attempts: ${llmCallsRepo(db).countSince(since)}, latency: ${latency} ms`);
-} catch (error) {
-	const code = error instanceof LlmError ? error.code : 'unknown';
-	console.error(`smoke test failed [${code}]: ${(error as Error).message}`);
+const result = await smokeTest(provider.id, { ...defaultLlmDeps(), db });
+if (!result.ok) {
+	console.error(`smoke test failed [${result.code}] after ${result.latencyMs} ms: ${result.message}`);
 	process.exit(1);
 }
+console.log(`provider: ${provider.name} (${provider.wireFormat}, ${provider.structuredMode}), model: ${result.model}`);
+console.log('result:', JSON.stringify(result.data, null, 2));
+console.log(`usage: ${result.inputTokens} input + ${result.outputTokens} output tokens`);
+console.log(`generations: ${result.attempts}, latency: ${result.latencyMs} ms`);

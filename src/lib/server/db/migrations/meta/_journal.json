@@ -64,6 +64,13 @@
       "when": 1791251579215,
       "tag": "0008_anchors_and_mining",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791254371171,
+      "tag": "0009_card_suspension",
+      "breakpoints": true
     }
   ]
 }

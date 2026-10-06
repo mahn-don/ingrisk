@@ -1,12 +1,17 @@
 // Request parsing and error mapping for the session API routes (the routes stay thin).
 import { json } from '@sveltejs/kit';
 import { z } from 'zod';
+import { TOPIC_CODES } from '../db/schema.ts';
 import { SessionError } from './engine.ts';
 
 const Shape = z.enum(['quick', 'read', 'write']);
 const Id = z.number().int().positive();
 
-export const StartBody = z.object({ budgetMin: z.number().int().min(1).max(60).optional(), shape: Shape.optional() }).strict();
+export const Focus = z.discriminatedUnion('kind', [
+	z.object({ kind: z.literal('hard') }).strict(),
+	z.object({ kind: z.literal('topic'), code: z.enum(TOPIC_CODES) }).strict()
+]);
+export const StartBody = z.object({ budgetMin: z.number().int().min(1).max(60).optional(), shape: Shape.optional(), focus: Focus.optional() }).strict();
 export const AnchorBody = z.object({ sessionId: Id, text: z.string().max(20_000) }).strict();
 export const GlossaryBody = z.object({ sessionId: Id, word: z.string().min(1).max(60) }).strict();
 export const FeedbackSeenBody = z.object({ submissionId: Id }).strict();

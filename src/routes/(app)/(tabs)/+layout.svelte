@@ -7,6 +7,7 @@
 	const tabs: Tab[] = [
 		{ href: '/', label: t.nav.home, icon: 'home' },
 		{ href: '/stats', label: t.nav.stats, icon: 'chart' },
+		{ href: '/review', label: t.nav.review, icon: 'book' },
 		{ href: '/settings', label: t.nav.settings, icon: 'settings' }
 	];
 </script>

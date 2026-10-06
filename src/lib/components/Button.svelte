@@ -43,7 +43,7 @@
 {/snippet}
 
 {#if href !== undefined}
-	<a {href} class={classes} aria-disabled={disabled || loading ? 'true' : undefined}>{@render content()}</a>
+	<a {href} class={classes} aria-label={rest['aria-label']} aria-disabled={disabled || loading ? 'true' : undefined}>{@render content()}</a>
 {:else}
 	<button {type} class={classes} disabled={disabled || loading} aria-busy={loading || undefined} {...rest}>{@render content()}</button>
 {/if}

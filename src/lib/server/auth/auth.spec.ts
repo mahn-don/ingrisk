@@ -58,8 +58,18 @@ describe('sessions', () => {
 	it('deleteExpired sweeps old rows', () => {
 		const db = createTestDb();
 		createSession(db, T0);
-		createSession(db, at(SESSION_TTL_MS));
+		createSession(db, at(SESSION_TTL_MS / 2));
 		expect(authSessionsRepo(db).deleteExpired(at(SESSION_TTL_MS))).toBe(1);
+		expect(authSessionsRepo(db).deleteExpired(at(SESSION_TTL_MS))).toBe(0);
+	});
+
+	it('a successful login deletes the expired sessions', () => {
+		const db = createTestDb();
+		const old = createSession(db, T0);
+		const recent = createSession(db, at(SESSION_TTL_MS / 2));
+		createSession(db, at(SESSION_TTL_MS + 1));
+		expect(authSessionsRepo(db).get(hashToken(old.token))).toBeUndefined();
+		expect(authSessionsRepo(db).get(hashToken(recent.token))).toBeDefined();
 	});
 });
 

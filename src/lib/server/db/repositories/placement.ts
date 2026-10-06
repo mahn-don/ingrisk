@@ -16,6 +16,10 @@ export interface PoolItem {
 /** Placement attempts (the test in progress) and results (never overwritten; retakes add rows). */
 export function placementRepo(db: DbOrTx) {
 	return {
+		/** Every placement result, oldest first (the level history). */
+		allResults(): PlacementResult[] {
+			return db.select().from(placementResults).orderBy(asc(placementResults.id)).all();
+		},
 		inProgress(): PlacementAttempt | undefined {
 			return db.select().from(placementAttempts).where(eq(placementAttempts.status, 'in_progress')).get();
 		},

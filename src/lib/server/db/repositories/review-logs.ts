@@ -1,4 +1,4 @@
-import { and, asc, countDistinct, eq, gte, isNotNull, isNull, lt, ne, or } from 'drizzle-orm';
+import { and, asc, count, countDistinct, eq, gte, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { DbOrTx } from '../client.ts';
 import { cards, clozeItems, reviewLogs } from '../schema.ts';
 
@@ -43,6 +43,22 @@ export function reviewLogsRepo(db: DbOrTx) {
 				.groupBy(cards.grammarTopicId)
 				.all();
 			return new Map(rows.map((r) => [r.topic!, r.n]));
+		},
+		/** Reviews of cloze cards with a grammar topic since `since`: per topic and gap type, total and Again. */
+		grammarClozeSince(since: Date): { topicId: number; gapType: string; total: number; again: number }[] {
+			return db
+				.select({
+					topicId: sql<number>`${cards.grammarTopicId}`,
+					gapType: clozeItems.gapType,
+					total: count(),
+					again: sql<number>`coalesce(sum(${reviewLogs.rating} = 'Again'), 0)`
+				})
+				.from(reviewLogs)
+				.innerJoin(cards, eq(cards.id, reviewLogs.cardId))
+				.innerJoin(clozeItems, eq(clozeItems.id, cards.clozeItemId))
+				.where(and(gte(reviewLogs.review, since), isNotNull(cards.grammarTopicId)))
+				.groupBy(cards.grammarTopicId, clozeItems.gapType)
+				.all();
 		},
 		/** All reviews of a card, oldest first. */
 		forCard(cardId: number): ReviewLogRow[] {

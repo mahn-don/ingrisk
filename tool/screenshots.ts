@@ -11,10 +11,11 @@ import { appLlmDeps } from '../src/lib/server/generation/app-llm.ts';
 import { gradeQueuedWritings } from '../src/lib/server/grading/queued.ts';
 import type { Anchor, SessionItem, StartResponse } from '../src/lib/session/types.ts';
 import { addDueCards, seedTestDatabase } from './lib/test-content.ts';
+import { seedHistory } from '../test/e2e/support.ts';
 
 const args = parseCli({
 	command: 'npm run screenshots --',
-	summary: 'Screenshot Login, Home, Stats, Settings, /dev/components, the placement test and Nhanh/Đọc/Viết sessions (390×844, light and dark) into tmp/screens/.',
+	summary: 'Screenshot Login, Home, Stats, the review book, Settings (each section, providers, credits), /dev/components, the placement test and Nhanh/Đọc/Viết sessions (390×844, light and dark) into tmp/screens/.',
 	usage: ['--port N           Port for the temporary dev server (default 5199); CHROMIUM_PATH picks a Chromium binary'],
 	example: '--port 5199',
 	options: { port: { type: 'string', default: '5199' } }
@@ -27,6 +28,8 @@ const origin = `http://localhost:${port}`;
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
 await seedTestDatabase(`${OUT}/app.db`, { clozePerBand: 30, anchors: true });
+// A few weeks of history for the stats page, and preposition cards with lapses for the review book.
+seedHistory(`${OUT}/app.db`, { days: 9, lapsed: 5 });
 
 const server = spawn('npx', ['vite', 'dev', '--port', String(port), '--strictPort'], {
 	detached: true,
@@ -251,6 +254,44 @@ async function feedbackAtStart(page: Page, shot: Shot, theme: string) {
 	await page.getByRole('button', { name: 'Đã xem' }).click();
 }
 
+/** Phase 10: stats, the review book (both tabs, the detail sheet), each settings section, providers. */
+async function progressScreens(page: Page, shot: Shot) {
+	await page.goto(`${origin}/stats`);
+	await page.waitForLoadState('networkidle');
+	await shot('stats-full', true);
+	await page.goto(`${origin}/review`);
+	await shot('review-hard', true);
+	await page.goto(`${origin}/review?tab=learned`);
+	await shot('review-learned');
+	const first = await page.getByTestId('review-row').first().getAttribute('data-card-id');
+	await page.goto(`${origin}/review?tab=learned&card=${first}`);
+	await page.getByTestId('card-detail').waitFor();
+	await shot('review-detail');
+	await page.goto(`${origin}/settings`);
+	await page.waitForLoadState('networkidle');
+	// The fixed tab bar would cover the bottom of a section's element screenshot.
+	await page.addStyleTag({ content: 'nav[aria-label="Điều hướng chính"] { display: none }' });
+	const sections = { learning: 'Học tập', theme: 'Giao diện', content: 'Nội dung', providers: 'Nhà cung cấp AI', usage: 'Sử dụng AI (7 ngày)', data: 'Dữ liệu', account: 'Tài khoản' };
+	for (const [slug, title] of Object.entries(sections)) {
+		const section = page.locator('section').filter({ has: page.getByRole('heading', { name: title, exact: true, level: 2 }) });
+		await section.scrollIntoViewIfNeeded();
+		const file = `${OUT}/settings-${slug}-${theme(page)}.png`;
+		await section.screenshot({ path: file });
+		files.push(file);
+	}
+	await page.goto(`${origin}/settings/providers`);
+	await shot('providers', true);
+	await page.goto(`${origin}/settings/providers?add`);
+	await shot('provider-form', true);
+	await page.goto(`${origin}/settings/credits`);
+	await shot('credits', true);
+	await page.goto(`${origin}/`);
+	await page.waitForLoadState('networkidle');
+	await shot('home-today');
+}
+const themes = new WeakMap<Page, string>();
+const theme = (page: Page) => themes.get(page) ?? 'light';
+
 await waitForServer();
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 const files: string[] = [];
@@ -259,6 +300,7 @@ for (const theme of ['light', 'dark'] as const) {
 	const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: theme, reducedMotion: 'reduce' });
 	await context.addCookies([{ name: 'theme', value: theme, url: origin }]);
 	const page = await context.newPage();
+	themes.set(page, theme);
 	const shot = async (name: string, fullPage = false) => {
 		await page.evaluate(() => document.fonts.ready);
 		const file = `${OUT}/${name}-${theme}.png`;
@@ -289,6 +331,7 @@ for (const { page, shot, theme } of contexts) {
 	await page.goto(`${origin}/`);
 	await page.waitForLoadState('networkidle');
 	await shot('home-shape');
+	await progressScreens(page, shot);
 }
 await browser.close();
 stop();

@@ -4,6 +4,7 @@ import { profileRepo } from '#lib/server/db/repositories/profile.js';
 import { gradeQueuedInBackground } from '#lib/server/placement/app.js';
 import { placementOverview } from '#lib/server/placement/engine.js';
 import { settingsRepo } from '#lib/server/db/repositories/settings.js';
+import { loadToday } from '#lib/server/progress/index.js';
 import { homeCounts } from '#lib/server/session/counts.js';
 import { shapeContext } from '#lib/server/session/shape.js';
 import type { Actions, PageServerLoad } from './$types';
@@ -14,8 +15,10 @@ export const load: PageServerLoad = () => {
 	gradeQueuedInBackground();
 	const profile = profileRepo(db).get();
 	const overview = placementOverview(db);
+	const now = new Date();
 	return {
-		counts: homeCounts(db, new Date()),
+		counts: homeCounts(db, now),
+		today: { ...loadToday(db, now), now: now.getTime() },
 		defaultBudget: settingsRepo(db).get().defaultSessionBudget,
 		// The rotation's inputs; the page applies the rules to the budget chosen (src/lib/session/shape.ts).
 		shape: shapeContext(db, settingsRepo(db).get().defaultSessionBudget),

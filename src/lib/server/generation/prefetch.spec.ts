@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { authSessionsRepo } from '../db/repositories/auth-sessions.ts';
 import { llmCallsRepo } from '../db/repositories/llm-calls.ts';
 import { profileRepo } from '../db/repositories/profile.ts';
 import { writingRepo } from '../db/repositories/writing.ts';
@@ -69,6 +70,18 @@ describe('prefetch', () => {
 		expect(summary.writing).toEqual({ graded: 1, failed: 0, remaining: 0 });
 		expect(requests[0].purpose).toBe('grade_writing');
 		expect(summary.llm.calls).toBe(2);
+	});
+
+	it('deletes expired login sessions first (housekeeping)', async () => {
+		const { fx, llm, context } = cannedWorld();
+		const now = llm.now();
+		const sessions = authSessionsRepo(fx.db);
+		sessions.insert({ id: 'expired', createdAt: new Date(now.getTime() - 40 * 86_400_000), expiresAt: new Date(now.getTime() - 1), lastSeenAt: new Date(0) });
+		sessions.insert({ id: 'valid', createdAt: now, expiresAt: new Date(now.getTime() + 86_400_000), lastSeenAt: now });
+		const summary = await prefetch({ maxCalls: 1 }, { llm, context, dailyCap: 500 });
+		expect(summary.expiredSessionsDeleted).toBe(1);
+		expect(sessions.get('expired')).toBeUndefined();
+		expect(sessions.get('valid')).toBeDefined();
 	});
 
 	it('stops at maxCalls', async () => {
