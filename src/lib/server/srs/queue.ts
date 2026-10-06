@@ -2,7 +2,7 @@
 import type { DbOrTx } from '../db/client.ts';
 import { cardsRepo, type CardRow } from '../db/repositories/cards.ts';
 import { reviewLogsRepo } from '../db/repositories/review-logs.ts';
-import { settingsRepo } from '../db/repositories/settings.ts';
+import { learningSettingsRepo } from '../db/repositories/settings.ts';
 
 /** Asia/Ho_Chi_Minh is UTC+7 all year (no daylight saving time). */
 export const TIME_ZONE_OFFSET_HOURS = 7;
@@ -34,16 +34,17 @@ export interface Queue {
 	introducedToday: number;
 }
 
-function newCardsLeftToday(db: DbOrTx, now: Date, newLimit: number): { left: number; introduced: number } {
+function newCardsLeftToday(db: DbOrTx, profileId: number, now: Date, newLimit: number): { left: number; introduced: number } {
 	const start = learningDayStart(now);
-	const introduced = reviewLogsRepo(db).countIntroducedBetween(start, new Date(start.getTime() + DAY));
+	const introduced = reviewLogsRepo(db, profileId).countIntroducedBetween(start, new Date(start.getTime() + DAY));
 	return { left: Math.max(0, newLimit - introduced), introduced };
 }
 
-export function buildQueue(db: DbOrTx, now: Date, { reviewLimit, newLimit }: QueueLimits): Queue {
-	const cards = cardsRepo(db);
+/** One learner's queue (Phase 12: everything is per profile). */
+export function buildQueue(db: DbOrTx, profileId: number, now: Date, { reviewLimit, newLimit }: QueueLimits): Queue {
+	const cards = cardsRepo(db, profileId);
 	const due = cards.dueCards(now, reviewLimit);
-	const { left, introduced } = newCardsLeftToday(db, now, newLimit);
+	const { left, introduced } = newCardsLeftToday(db, profileId, now, newLimit);
 	const fresh = left > 0 ? cards.newCards(left) : [];
 	return { cards: [...due, ...fresh], dueCount: due.length, newCount: fresh.length, introducedToday: introduced };
 }
@@ -55,9 +56,9 @@ export interface HomeCounts {
 	learning: number;
 }
 
-/** Counts for the home screen; the daily new-card limit comes from settings unless given. */
-export function counts(db: DbOrTx, now: Date, newLimit = settingsRepo(db).get().newCardsPerDay): HomeCounts {
-	const totals = cardsRepo(db).counts(now);
-	const { left } = newCardsLeftToday(db, now, newLimit);
+/** One learner's counts for the home screen; the daily new-card limit comes from their settings unless given. */
+export function counts(db: DbOrTx, profileId: number, now: Date, newLimit = learningSettingsRepo(db, profileId).get().newCardsPerDay): HomeCounts {
+	const totals = cardsRepo(db, profileId).counts(now);
+	const { left } = newCardsLeftToday(db, profileId, now, newLimit);
 	return { due: totals.due, newAvailableToday: Math.min(totals.new, left), learning: totals.learning };
 }

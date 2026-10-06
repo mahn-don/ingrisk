@@ -140,38 +140,78 @@ export const llmProviders = sqliteTable(
 	]
 );
 
-/** Single row (id = 1), seeded by the initial migration. */
+/**
+ * Global settings, single row (id = 1). Since Phase 12 only what all learners share: the active
+ * LLM provider. The learning settings moved to profile_settings (migration 0010).
+ */
 export const settings = sqliteTable(
 	'settings',
 	{
 		id: integer('id').primaryKey().default(1),
+		activeProviderId: integer('active_provider_id').references(() => llmProviders.id, {
+			onDelete: 'set null'
+		})
+	},
+	(t) => [check('settings_single_row', sql`${t.id} = 1`)]
+);
+
+// --- Learner profiles (Phase 12) ----------------------------------------------------------------
+
+/**
+ * One learner behind the shared app password (Netflix-style). Archived profiles are hidden, never
+ * deleted. Profile 1 ("Hồ sơ 1") holds everything from before migration 0010.
+ */
+export const profiles = sqliteTable(
+	'profiles',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		name: text('name').notNull(),
+		emoji: text('emoji'),
+		createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+		archivedAt: integer('archived_at', { mode: 'timestamp_ms' })
+	},
+	(t) => [uniqueIndex('profiles_name_unique').on(t.name), check('profiles_name_length', sql`length(${t.name}) between 1 and 30`)]
+);
+
+/** A profile's learning settings: one row per profile (the checks of the old settings columns). */
+export const profileSettings = sqliteTable(
+	'profile_settings',
+	{
+		profileId: integer('profile_id')
+			.primaryKey()
+			.references(() => profiles.id, { onDelete: 'cascade' }),
 		desiredRetention: real('desired_retention').notNull().default(0.9),
 		weeklyGoalDays: integer('weekly_goal_days').notNull().default(5),
 		defaultSessionBudget: integer('default_session_budget').notNull().default(8),
 		feedbackMode: text('feedback_mode', { enum: FEEDBACK_MODES }).notNull().default('direct'),
 		/** New cards introduced per learning day (see srs/queue.ts). */
-		newCardsPerDay: integer('new_cards_per_day').notNull().default(10),
-		activeProviderId: integer('active_provider_id').references(() => llmProviders.id, {
-			onDelete: 'set null'
-		})
+		newCardsPerDay: integer('new_cards_per_day').notNull().default(10)
 	},
 	(t) => [
-		check('settings_single_row', sql`${t.id} = 1`),
-		check('settings_desired_retention', sql`${t.desiredRetention} between 0.7 and 0.97`),
-		check('settings_weekly_goal_days', sql`${t.weeklyGoalDays} between 1 and 7`),
-		check('settings_default_session_budget', sql`${t.defaultSessionBudget} between 1 and 60`),
-		check('settings_feedback_mode', oneOf(t.feedbackMode, FEEDBACK_MODES)),
-		check('settings_new_cards_per_day', sql`${t.newCardsPerDay} between 0 and 50`)
+		check('profile_settings_desired_retention', sql`${t.desiredRetention} between 0.7 and 0.97`),
+		check('profile_settings_weekly_goal_days', sql`${t.weeklyGoalDays} between 1 and 7`),
+		check('profile_settings_default_session_budget', sql`${t.defaultSessionBudget} between 1 and 60`),
+		check('profile_settings_feedback_mode', oneOf(t.feedbackMode, FEEDBACK_MODES)),
+		check('profile_settings_new_cards_per_day', sql`${t.newCardsPerDay} between 0 and 50`)
 	]
 );
 
+/** The per-learner foreign key (Phase 12): NOT NULL, rows stay when nothing else changes. */
+const profileRef = () =>
+	integer('profile_id')
+		.notNull()
+		.references(() => profiles.id, { onDelete: 'restrict' });
+/** Nullable: null = shared by every profile (Tatoeba content), else one learner's own row. */
+const ownerRef = () => integer('profile_id').references(() => profiles.id, { onDelete: 'restrict' });
+
 // --- Learner ------------------------------------------------------------------------------------
 
-/** Single row (id = 1), seeded by the initial migration. Estimates stay null until placement. */
+/** One row per profile (Phase 12; before: a single row). Estimates stay null until placement. */
 export const userProfile = sqliteTable(
 	'user_profile',
 	{
-		id: integer('id').primaryKey().default(1),
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		profileId: profileRef(),
 		theta: real('theta'),
 		cefrEstimate: text('cefr_estimate', { enum: CEFR_LEVELS }),
 		vstepEstimate: integer('vstep_estimate'),
@@ -187,7 +227,7 @@ export const userProfile = sqliteTable(
 		updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(createdNow)
 	},
 	(t) => [
-		check('user_profile_single_row', sql`${t.id} = 1`),
+		uniqueIndex('user_profile_profile_id_unique').on(t.profileId),
 		check('user_profile_cefr_estimate', oneOf(t.cefrEstimate, CEFR_LEVELS)),
 		check('user_profile_known_band_ceiling', sql`${t.knownBandCeiling} between 1 and 8`)
 	]
@@ -197,6 +237,7 @@ export const placementResults = sqliteTable(
 	'placement_results',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
+		profileId: profileRef(),
 		takenAt: integer('taken_at', { mode: 'timestamp_ms' }).notNull(),
 		theta: real('theta').notNull(),
 		cefr: text('cefr', { enum: CEFR_LEVELS }).notNull(),
@@ -212,6 +253,7 @@ export const placementResults = sqliteTable(
 		reliabilityFlags: text('reliability_flags', { mode: 'json' }).$type<ReliabilityFlag[]>().notNull().default([])
 	},
 	(t) => [
+		index('placement_results_profile_id').on(t.profileId, t.id),
 		check('placement_results_cefr', oneOf(t.cefr, CEFR_LEVELS)),
 		check('placement_results_writing_status', oneOf(t.writingStatus, PLACEMENT_WRITING_STATUSES))
 	]
@@ -225,6 +267,7 @@ export const placementAttempts = sqliteTable(
 	'placement_attempts',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
+		profileId: profileRef(),
 		startedAt: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
 		finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
 		status: text('status', { enum: PLACEMENT_ATTEMPT_STATUSES }).notNull().default('in_progress'),
@@ -234,7 +277,8 @@ export const placementAttempts = sqliteTable(
 		resultId: integer('result_id').references(() => placementResults.id, { onDelete: 'set null' })
 	},
 	(t) => [
-		uniqueIndex('placement_attempts_one_in_progress').on(t.status).where(sql`${t.status} = 'in_progress'`),
+		// One attempt in progress per profile (Phase 12; before: one in all).
+		uniqueIndex('placement_attempts_one_in_progress').on(t.profileId, t.status).where(sql`${t.status} = 'in_progress'`),
 		check('placement_attempts_status', oneOf(t.status, PLACEMENT_ATTEMPT_STATUSES)),
 		check('placement_attempts_part', oneOf(t.part, PLACEMENT_PARTS))
 	]
@@ -296,11 +340,14 @@ export const sentences = sqliteTable(
 		blocked: integer('blocked', { mode: 'boolean' }).notNull().default(false),
 		blockedReason: text('blocked_reason'),
 		/** English mentions Tatoeba's stock names Tom or Mary (sessions cap how many they show). */
-		hasStockNames: integer('has_stock_names', { mode: 'boolean' }).notNull().default(false)
+		hasStockNames: integer('has_stock_names', { mode: 'boolean' }).notNull().default(false),
+		/** A learner's own mined error sentence (Phase 12); null = shared content (Tatoeba). */
+		profileId: ownerRef()
 	},
 	(t) => [
 		uniqueIndex('sentences_tatoeba_id_en_unique').on(t.tatoebaIdEn),
-		index('sentences_blocked_level_band').on(t.blocked, t.levelBand)
+		index('sentences_blocked_level_band').on(t.blocked, t.levelBand),
+		index('sentences_profile_id').on(t.profileId)
 	]
 );
 
@@ -360,10 +407,13 @@ export const clozeItems = sqliteTable(
 		model: text('model'),
 		/** Identity of the candidate (sentence, gap type, position, answer): reruns skip it. */
 		contentHash: text('content_hash').notNull(),
-		createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull()
+		createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+		/** A learner's own mined error item (Phase 12); null = shared pool. */
+		profileId: ownerRef()
 	},
 	(t) => [
 		uniqueIndex('cloze_items_content_hash_unique').on(t.contentHash),
+		index('cloze_items_profile_id').on(t.profileId),
 		index('cloze_items_validated_type_band').on(t.validated, t.gapType, t.levelBand),
 		index('cloze_items_sentence_id').on(t.sentenceId),
 		check('cloze_items_gap_type', oneOf(t.gapType, CLOZE_GAP_TYPES))
@@ -380,6 +430,7 @@ export const cards = sqliteTable(
 	'cards',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
+		profileId: profileRef(),
 		kind: text('kind', { enum: CARD_KINDS }).notNull(),
 		lexemeId: integer('lexeme_id').references(() => lexemes.id, { onDelete: 'restrict' }),
 		sentenceId: integer('sentence_id').references(() => sentences.id, { onDelete: 'restrict' }),
@@ -406,14 +457,17 @@ export const cards = sqliteTable(
 	(t) => [
 		// SQLite treats NULLs as distinct in unique indexes, so the nullable references are
 		// mapped to 0 (never a real id): the same item cannot become two cards.
+		// Per profile (Phase 12): two learners may each have a card on the same item.
 		uniqueIndex('cards_item_unique').on(
+			t.profileId,
 			t.kind,
 			nullAsZero(t.lexemeId),
 			nullAsZero(t.sentenceId),
 			nullAsZero(t.grammarTopicId)
 		),
-		uniqueIndex('cards_cloze_item_unique').on(t.clozeItemId).where(sql`${t.clozeItemId} is not null`),
+		uniqueIndex('cards_cloze_item_unique').on(t.profileId, t.clozeItemId).where(sql`${t.clozeItemId} is not null`),
 		index('cards_due').on(t.due),
+		index('cards_profile_state_due').on(t.profileId, t.state, t.due),
 		check('cards_kind', oneOf(t.kind, CARD_KINDS)),
 		check('cards_prompt_mode', oneOf(t.promptMode, PROMPT_MODES)),
 		check('cards_state', oneOf(t.state, FSRS_STATES))
@@ -430,6 +484,7 @@ export const reviewLogs = sqliteTable(
 	'review_logs',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
+		profileId: profileRef(),
 		cardId: integer('card_id')
 			.notNull()
 			.references(() => cards.id, { onDelete: 'restrict' }),
@@ -452,6 +507,7 @@ export const reviewLogs = sqliteTable(
 	},
 	(t) => [
 		index('review_logs_card_id').on(t.cardId, t.review),
+		index('review_logs_profile_review').on(t.profileId, t.review),
 		check('review_logs_rating', oneOf(t.rating, FSRS_RATINGS)),
 		check('review_logs_state', oneOf(t.state, FSRS_STATES))
 	]
@@ -489,6 +545,7 @@ export const sessions = sqliteTable(
 	'sessions',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
+		profileId: profileRef(),
 		/**
 		 * Generated by the client, sent with the results; makes finishing idempotent. A server
 		 * placeholder ("pending:<uuid>") until the session is finished.
@@ -510,8 +567,10 @@ export const sessions = sqliteTable(
 	},
 	(t) => [
 		uniqueIndex('sessions_client_session_id_unique').on(t.clientSessionId),
-		uniqueIndex('sessions_one_in_progress').on(t.status).where(sql`${t.status} = 'in_progress'`),
+		// One session in progress per profile (Phase 12; before: one in all).
+		uniqueIndex('sessions_one_in_progress').on(t.profileId, t.status).where(sql`${t.status} = 'in_progress'`),
 		index('sessions_finished_at').on(t.finishedAt),
+		index('sessions_profile_finished_at').on(t.profileId, t.finishedAt),
 		check('sessions_shape', oneOf(t.shape, SESSION_SHAPES)),
 		check('sessions_status', oneOf(t.status, SESSION_STATUSES))
 	]
@@ -555,7 +614,9 @@ export const authSessions = sqliteTable(
 		id: text('id').primaryKey(),
 		createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
 		expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
-		lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }).notNull()
+		lastSeenAt: integer('last_seen_at', { mode: 'timestamp_ms' }).notNull(),
+		/** The profile chosen on /profiles (Phase 12); null until one is picked. */
+		profileId: integer('profile_id').references(() => profiles.id, { onDelete: 'set null' })
 	},
 	(t) => [index('auth_sessions_expires_at').on(t.expiresAt)]
 );
@@ -575,6 +636,7 @@ export const writingSubmissions = sqliteTable(
 	'writing_submissions',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
+		profileId: profileRef(),
 		sessionId: integer('session_id').references(() => sessions.id, { onDelete: 'set null' }),
 		prompt: text('prompt').notNull(),
 		userText: text('user_text').notNull(),
@@ -604,6 +666,7 @@ export const writingSubmissions = sqliteTable(
 	},
 	(t) => [
 		index('writing_submissions_status').on(t.status),
+		index('writing_submissions_profile_status').on(t.profileId, t.status),
 		check('writing_submissions_status', oneOf(t.status, WRITING_STATUSES)),
 		check('writing_submissions_cefr_estimate', oneOf(t.cefrEstimate, CEFR_LEVELS)),
 		check('writing_submissions_task_kind', oneOf(t.taskKind, WRITING_TASK_KINDS))
@@ -615,6 +678,7 @@ export const drillResults = sqliteTable(
 	'drill_results',
 	{
 		id: integer('id').primaryKey({ autoIncrement: true }),
+		profileId: profileRef(),
 		sessionId: integer('session_id')
 			.notNull()
 			.references(() => sessions.id, { onDelete: 'cascade' }),
@@ -625,7 +689,11 @@ export const drillResults = sqliteTable(
 		correct: integer('correct', { mode: 'boolean' }).notNull(),
 		answeredAt: integer('answered_at', { mode: 'timestamp_ms' }).notNull()
 	},
-	(t) => [index('drill_results_answered_at').on(t.answeredAt), check('drill_results_topic_code', oneOf(t.topicCode, TOPIC_CODES))]
+	(t) => [
+		index('drill_results_answered_at').on(t.answeredAt),
+		index('drill_results_profile_answered_at').on(t.profileId, t.answeredAt),
+		check('drill_results_topic_code', oneOf(t.topicCode, TOPIC_CODES))
+	]
 );
 
 // --- LLM call log -------------------------------------------------------------------------------
@@ -653,7 +721,9 @@ export const llmCalls = sqliteTable(
 		errorCode: text('error_code'),
 		inputTokens: integer('input_tokens'),
 		outputTokens: integer('output_tokens'),
-		latencyMs: integer('latency_ms').notNull()
+		latencyMs: integer('latency_ms').notNull(),
+		/** The learner the call was for (grading); null for shared generation and checks (Phase 12). */
+		profileId: integer('profile_id')
 	},
-	(t) => [index('llm_calls_created_at').on(t.createdAt)]
+	(t) => [index('llm_calls_created_at').on(t.createdAt), index('llm_calls_profile_created_at').on(t.profileId, t.createdAt)]
 );

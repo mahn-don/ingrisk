@@ -12,13 +12,13 @@ export { QUICK_BUDGET_MIN, type ShapeContext, defaultShape, resolveShape, shapeO
 /** A passage within this many bands of known_band_ceiling counts as "at the right band". */
 export const READING_BAND_DISTANCE = 1;
 
-export function shapeContext(db: DbOrTx, budgetMin: number): ShapeContext {
-	const last = sessionsRepo(db).lastFinishedNonQuick()?.shape;
+export function shapeContext(db: DbOrTx, profileId: number, budgetMin: number): ShapeContext {
+	const last = sessionsRepo(db, profileId).lastFinishedNonQuick()?.shape;
 	return {
 		budgetMin,
 		lastNonQuick: last === 'read' || last === 'write' ? last : null,
-		unseenFeedback: writingRepo(db).unseenFeedback().length > 0,
-		readAvailable: cacheRepo(db).hasUnservedNear('reading', profileRepo(db).get().knownBandCeiling, READING_BAND_DISTANCE),
+		unseenFeedback: writingRepo(db, profileId).unseenFeedback().length > 0,
+		readAvailable: cacheRepo(db).hasUnservedNear('reading', profileRepo(db, profileId).get().knownBandCeiling, READING_BAND_DISTANCE),
 		writeAvailable: llmConfigured(db)
 	};
 }

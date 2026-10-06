@@ -36,6 +36,8 @@ export interface LlmDeps extends TransportDeps {
 	env: Env;
 	/** Timestamps for the call log. */
 	now: () => Date;
+	/** The learner the calls are for (grading), logged in llm_calls.profile_id; unset for shared content (Phase 12). */
+	profileId?: number;
 }
 
 export function defaultLlmDeps(): LlmDeps {
@@ -57,6 +59,8 @@ interface BaseRequest {
 	providerId?: number;
 	/** Fall back to the provider flagged is_fallback on availability errors (default true). */
 	fallback?: boolean;
+	/** The learner the call is for (grading), logged in llm_calls.profile_id; omit for shared content (Phase 12). */
+	profileId?: number;
 }
 
 export interface StructuredRequest<S extends ZodType> extends BaseRequest {
@@ -118,7 +122,8 @@ async function exchange(
 			errorCode: fields.errorCode,
 			inputTokens: fields.usage?.inputTokens ?? null,
 			outputTokens: fields.usage?.outputTokens ?? null,
-			latencyMs: fields.latencyMs
+			latencyMs: fields.latencyMs,
+			profileId: req.profileId ?? ctx.deps.profileId ?? null
 		});
 	const http = buildRequest(provider, key, {
 		system: req.system,

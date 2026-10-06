@@ -15,7 +15,7 @@ import { seedHistory } from '../test/e2e/support.ts';
 
 const args = parseCli({
 	command: 'npm run screenshots --',
-	summary: 'Screenshot Login, Home, Stats, the review book, Settings (each section, providers, credits), /dev/components, the placement test and Nhanh/Đọc/Viết sessions (390×844, light and dark) into tmp/screens/.',
+	summary: 'Screenshot Login, the profile picker, Home, Stats, the review book, Settings (each section, providers, credits), /dev/components, the placement test and Nhanh/Đọc/Viết sessions (390×844, light and dark) into tmp/screens/.',
 	usage: ['--port N           Port for the temporary dev server (default 5199); CHROMIUM_PATH picks a Chromium binary'],
 	example: '--port 5199',
 	options: { port: { type: 'string', default: '5199' } }
@@ -311,6 +311,10 @@ for (const theme of ['light', 'dark'] as const) {
 	await shot('login');
 	await page.getByLabel('Mật khẩu').fill(PASSWORD);
 	await page.getByRole('button', { name: 'Đăng nhập' }).click();
+	// Phase 12: the profile picker, then learn as "Hồ sơ 1".
+	await page.waitForURL(`${origin}/profiles`);
+	await shot('profiles');
+	await page.getByRole('button', { name: 'Học với hồ sơ Hồ sơ 1', exact: true }).click();
 	await page.waitForURL(`${origin}/`);
 	await shot('home');
 	for (const path of ['stats', 'settings']) {

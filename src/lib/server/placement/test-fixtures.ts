@@ -3,7 +3,7 @@ import type { DbOrTx } from '../db/client.ts';
 import { clozeItemsRepo } from '../db/repositories/cloze-items.ts';
 import { sentencesRepo } from '../db/repositories/sentences.ts';
 import type { CLOZE_GAP_TYPES } from '../db/schema.ts';
-import { createTestDb } from '../db/test-db.ts';
+import { TEST_PROFILE, createTestDb } from '../db/test-db.ts';
 import type { WritingPrompt } from '../generation/writing-prompts.ts';
 import type { EngineDeps, PlacementContent } from './engine.ts';
 
@@ -78,6 +78,7 @@ export function engineDeps(overrides: Partial<EngineDeps> = {}): EngineDeps & { 
 	const clock = { t: 1_800_000_000_000 };
 	return {
 		db: createTestDb(),
+		profileId: TEST_PROFILE,
 		now: () => new Date((clock.t += 1000)),
 		content: CONTENT,
 		grade: null,

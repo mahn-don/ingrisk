@@ -2,8 +2,9 @@
 
 ## Project
 
-SilentEnglish is a personal, single-user, non-commercial web app that teaches English reading,
-writing, vocabulary and grammar to a Vietnamese speaker. There is no audio of any kind. Sessions
+SilentEnglish is a personal, non-commercial web app that teaches English reading, writing,
+vocabulary and grammar to a Vietnamese speaker. One app password; behind it, Netflix-style learner
+profiles (Phase 12), each with its own placement, cards, history, streak and learning settings. There is no audio of any kind. Sessions
 last 5–10 minutes and are used in a phone's browser, always online (no PWA, no offline mode). The
 entire UI is in Vietnamese. It runs on a small VPS, served by Node over plain HTTP on the server's IP
 for now (HTTPS can be added later via deployment config), with SQLite as the only datastore.
@@ -46,7 +47,9 @@ src/
       progress/          streak, weekly goal, heat-map, forecast, weakness (pure; recomputed on read)
       review-book/       the review book: hard / learned lists, card detail, Ôn ngay, Tạm ẩn
       settings/          settings forms (Zod), providers, stock, AI usage, backup, credits
-      auth/              sessions, cookie rules, login limiter, the public-path allowlist
+      auth/              sessions (with the picked profile), cookie rules, login limiter, the public-path
+                         allowlist, profileIdOf(locals)
+      profiles/          the /profiles picker: create, rename, archive, the grid (level, streak)
       content/           generated JSON assets (NGSL, Tatoeba pairs, pseudo-words); built by
                          `npm run content:prepare`, never edited by hand. Exception:
                          blocklist.txt (hand-maintained; used by `content:import`)
@@ -92,7 +95,7 @@ SvelteKit 3 renamed `$app/environment` to `$app/env`.
 | `npm run prefetch -- [--max-calls N] [--dry-run]` | Top up the stock (cloze, drills, passages), cheapest first; same as the cron endpoint |
 | `npm run llm:usage -- --days 7` | LLM calls and tokens per day × purpose × model |
 | `npm run auth:hash` | Prompt for the login password twice (hidden) and print `APP_PASSWORD_HASH` |
-| `npm run screenshots` | Login, Home, Stats, the review book, Settings (each section, providers, credits), `/dev/components`, the placement test and sessions at 390×844, light + dark, into `tmp/screens/` |
+| `npm run screenshots` | Login, the profile picker, Home, Stats, the review book, Settings (each section, providers, credits), `/dev/components`, the placement test and sessions at 390×844, light + dark, into `tmp/screens/` |
 | `npm run test:seed -- --db PATH [--anchors]` | A throwaway test database: content, a cloze pool (and passages, drills) built with the canned LLM |
 | `npm run db:generate` | Generate a SQL migration from `src/lib/server/db/schema.ts` (commit it) |
 | `npm run db:migrate` | Apply pending migrations to `DATABASE_PATH` (default `data/app.db`) |
@@ -134,7 +137,21 @@ deploy/install.sh`; then `deploy/deploy.sh` (no password; rollback: `git checkou
   Never edit an applied migration. Migrations run automatically at server start, with foreign
   keys off (a rebuild can drop a referenced table) and a `foreign_key_check` afterwards. Review
   drizzle-kit's rebuilds: its `INSERT … SELECT` copies columns the old table lacks.
-- Repositories take the db as a parameter; tests use `createTestDb()` (in-memory, migrated).
+- Repositories take the db as a parameter; tests use `createTestDb()` (in-memory, migrated) and
+  `TEST_PROFILE` (profile 1, which every migrated database has).
+
+## Profiles
+
+- Per-learner data (user_profile, profile_settings, placement, cards, review_logs, sessions,
+  writing_submissions, drill_results, mined sentences and cloze items) is scoped by `profileId`.
+  Every repository and server function that touches it takes `profileId` explicitly
+  (`cardsRepo(db, profileId)`, `startSession(db, profileId, now, …)`); there is no global "current
+  profile". Routes get it with `profileIdOf(locals)`; `hooks.server.ts` sets `locals.profile` from
+  the login session and sends a request without one to `/profiles` (`/api/*`: 409).
+- Shared, unowned: Tatoeba content, `generated_cache`, the cloze pool (`clozeItemsRepo`: rows with
+  `profile_id IS NULL`), providers and `settings` (only the active provider). A learner's view of
+  the pool is `learnerClozeRepo(db, profileId)`: shared items plus their own mined ones.
+- A new per-learner query needs a case in `profiles/leakage.spec.ts`.
 
 ## Spaced repetition
 

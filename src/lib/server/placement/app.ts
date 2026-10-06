@@ -1,6 +1,6 @@
 // The placement engine wired to the app: the app database, the content, live (or canned) grading.
 import { getDb } from '../db/client.ts';
-import { writingRepo } from '../db/repositories/writing.ts';
+import { queuedWritingsAllProfiles } from '../db/repositories/writing.ts';
 import { appLlmDeps, llmConfigured } from '../generation/app-llm.ts';
 import { dailyCapFromEnv } from '../generation/budget.ts';
 import { gradeWriting } from '../grading/grading.ts';
@@ -14,14 +14,15 @@ const logError = (message: string, error: unknown) => {
 	console.error(`${message}: ${e?.name ?? 'Error'}${e?.code ? ` (${e.code})` : ''}`);
 };
 
-export function appEngineDeps(): EngineDeps {
+export function appEngineDeps(profileId: number): EngineDeps {
 	const db = getDb();
 	return {
 		db,
+		profileId,
 		now: () => new Date(),
 		content: loadPlacementContent(db),
 		grade: llmConfigured(db)
-			? async (request) => toGradedWriting((await gradeWriting({ ...request, feedback_mode: 'direct' }, appLlmDeps(db))).feedback)
+			? async (request) => toGradedWriting((await gradeWriting({ ...request, feedback_mode: 'direct' }, { ...appLlmDeps(db), profileId })).feedback)
 			: null,
 		logError
 	};
@@ -41,7 +42,7 @@ let backgroundRunning = false;
 export function gradeQueuedInBackground(now = Date.now()): void {
 	if (backgroundRunning || now - lastBackgroundRun < BACKGROUND_INTERVAL_MS) return;
 	const db = getDb();
-	if (!llmConfigured(db) || writingRepo(db).queued().length === 0) return;
+	if (!llmConfigured(db) || queuedWritingsAllProfiles(db).length === 0) return;
 	lastBackgroundRun = now;
 	backgroundRunning = true;
 	void gradeQueuedWritings({ maxCalls: BACKGROUND_MAX_CALLS }, { llm: appLlmDeps(db), dailyCap: dailyCapFromEnv(process.env) })

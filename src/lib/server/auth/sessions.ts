@@ -15,6 +15,8 @@ export const hashToken = (token: string) => createHash('sha256').update(token).d
 
 export interface Session {
 	expiresAt: Date;
+	/** The profile picked on /profiles after login (Phase 12); null until one is picked. */
+	profileId: number | null;
 }
 
 /** Start a session (a successful login; expired sessions are deleted): returns the cookie token (never stored) and its expiry. */
@@ -22,7 +24,7 @@ export function createSession(db: DbOrTx, now: Date): { token: string; expiresAt
 	const token = randomBytes(32).toString('base64url');
 	const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
 	authSessionsRepo(db).deleteExpired(now);
-	authSessionsRepo(db).insert({ id: hashToken(token), createdAt: now, expiresAt, lastSeenAt: now });
+	authSessionsRepo(db).insert({ id: hashToken(token), createdAt: now, expiresAt, lastSeenAt: now, profileId: null });
 	return { token, expiresAt };
 }
 
@@ -40,10 +42,15 @@ export function resolveSession(db: DbOrTx, token: string | undefined, now: Date)
 		repo.delete(id);
 		return null;
 	}
-	if (now.getTime() - row.lastSeenAt.getTime() < SESSION_TOUCH_MS) return { expiresAt: row.expiresAt, refreshed: false };
+	if (now.getTime() - row.lastSeenAt.getTime() < SESSION_TOUCH_MS) return { expiresAt: row.expiresAt, profileId: row.profileId, refreshed: false };
 	const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
 	repo.update(id, { lastSeenAt: now, expiresAt });
-	return { expiresAt, refreshed: true };
+	return { expiresAt, profileId: row.profileId, refreshed: true };
+}
+
+/** Bind the login session to a profile ("Đổi hồ sơ" picks another). */
+export function selectProfile(db: DbOrTx, token: string | undefined, profileId: number): void {
+	if (token !== undefined && TOKEN.test(token)) authSessionsRepo(db).update(hashToken(token), { profileId });
 }
 
 export function deleteSession(db: DbOrTx, token: string | undefined): void {

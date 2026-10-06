@@ -1,6 +1,6 @@
 // FSRS scheduler built from the learner's settings. Thin wrapper: ts-fsrs does all the maths.
 import { type FSRS, fsrs, generatorParameters } from 'ts-fsrs';
-import type { Settings } from '../db/repositories/settings.ts';
+import type { LearningSettings } from '../db/repositories/settings.ts';
 
 export const MAXIMUM_INTERVAL_DAYS = 36_500;
 export const LEARNING_STEPS = ['1m', '10m'] as const;
@@ -16,7 +16,7 @@ export interface SchedulerOptions {
  * short-term learning steps 1m/10m and relearning step 10m.
  */
 export function createScheduler(
-	settings: Pick<Settings, 'desiredRetention'>,
+	settings: Pick<LearningSettings, 'desiredRetention'>,
 	options: SchedulerOptions = {}
 ): FSRS {
 	return fsrs(

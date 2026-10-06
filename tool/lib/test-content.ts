@@ -3,7 +3,8 @@
 import { rmSync } from 'node:fs';
 import { createDb, migrate } from '../../src/lib/server/db/client.ts';
 import { cardsRepo } from '../../src/lib/server/db/repositories/cards.ts';
-import { clozeItemsRepo } from '../../src/lib/server/db/repositories/cloze-items.ts';
+import { learnerClozeRepo } from '../../src/lib/server/db/repositories/cloze-items.ts';
+import { FIRST_PROFILE_ID } from '../../src/lib/server/db/repositories/profiles.ts';
 import { newCardFields } from '../../src/lib/server/srs/mapping.ts';
 import { appLlmDeps } from '../../src/lib/server/generation/app-llm.ts';
 import { unlimitedBudget } from '../../src/lib/server/generation/batch.ts';
@@ -39,7 +40,7 @@ export async function seedTestDatabase(path: string, options: { clozePerBand: nu
 			{ budget }
 		);
 	}
-	const pool = clozeItemsRepo(db).availableByBand();
+	const pool = learnerClozeRepo(db, FIRST_PROFILE_ID).availableByBand();
 	db.$client.close();
 	return pool;
 }
@@ -50,8 +51,9 @@ export async function seedTestDatabase(path: string, options: { clozePerBand: nu
  */
 export function addDueCards(path: string, count: number, now = new Date()): void {
 	const db = createDb(path);
-	const cards = cardsRepo(db);
-	const candidates = clozeItemsRepo(db)
+	// The seeded e2e databases learn as profile 1 ("Hồ sơ 1").
+	const cards = cardsRepo(db, FIRST_PROFILE_ID);
+	const candidates = learnerClozeRepo(db, FIRST_PROFILE_ID)
 		.newCardCandidates(8)
 		.filter((c) => !c.hasStockNames && c.gapType !== 'article');
 	const strong = candidates.find((c) => c.gapType === 'lexical' && c.answer.length >= 6 && c.answer === c.answer.toLowerCase());

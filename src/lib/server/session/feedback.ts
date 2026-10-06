@@ -3,7 +3,7 @@
 import type { DbOrTx } from '../db/client.ts';
 import { grammarTopicsRepo } from '../db/repositories/grammar-topics.ts';
 import { placementRepo } from '../db/repositories/placement.ts';
-import { settingsRepo } from '../db/repositories/settings.ts';
+import { learningSettingsRepo } from '../db/repositories/settings.ts';
 import { type WritingSubmission, writingRepo } from '../db/repositories/writing.ts';
 import { selectShownErrors } from '../llm/prompts/feedback.ts';
 import type { FeedbackCard, TopicCode } from '../../session/types.ts';
@@ -11,11 +11,11 @@ import type { FeedbackCard, TopicCode } from '../../session/types.ts';
 /** The card for a scored submission; the corrected text only in direct feedback mode. */
 export function feedbackCard(db: DbOrTx, submission: WritingSubmission): FeedbackCard {
 	const names = new Map(grammarTopicsRepo(db).all().map((t) => [t.code, t.nameVi]));
-	const direct = settingsRepo(db).get().feedbackMode === 'direct';
+	const direct = learningSettingsRepo(db, submission.profileId).get().feedbackMode === 'direct';
 	return {
 		submissionId: submission.id,
 		taskKind: submission.taskKind,
-		placement: placementRepo(db).resultByWritingSubmission(submission.id) !== undefined,
+		placement: placementRepo(db, submission.profileId).resultByWritingSubmission(submission.id) !== undefined,
 		prompt: submission.prompt,
 		userText: submission.userText,
 		correctedText: direct ? submission.correctedText : null,
@@ -39,4 +39,4 @@ export function feedbackCard(db: DbOrTx, submission: WritingSubmission): Feedbac
 }
 
 /** Scored submissions whose feedback the learner has not seen (placement ones included). */
-export const unseenFeedbackCards = (db: DbOrTx): FeedbackCard[] => writingRepo(db).unseenFeedback().map((s) => feedbackCard(db, s));
+export const unseenFeedbackCards = (db: DbOrTx, profileId: number): FeedbackCard[] => writingRepo(db, profileId).unseenFeedback().map((s) => feedbackCard(db, s));

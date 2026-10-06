@@ -5,9 +5,9 @@
 import type { FSRS } from 'ts-fsrs';
 import type { DbOrTx } from '../db/client.ts';
 import { type CardRow, cardsRepo } from '../db/repositories/cards.ts';
-import { clozeItemsRepo } from '../db/repositories/cloze-items.ts';
+import { learnerClozeRepo } from '../db/repositories/cloze-items.ts';
 import { reviewBookRepo } from '../db/repositories/review-book.ts';
-import { settingsRepo } from '../db/repositories/settings.ts';
+import { learningSettingsRepo } from '../db/repositories/settings.ts';
 import { createScheduler, toFsrsCard } from '../srs/index.ts';
 import type { SessionItem, TopicCode } from '../../session/types.ts';
 import { type ComposedSession, arrange, itemCount, promptMode, toItem } from './compose.ts';
@@ -41,20 +41,20 @@ export function byTopicPriority<T extends { card: CardRow }>(rows: readonly T[],
 }
 
 /** The cards of a focus session, in order, as session items (prompt modes updated). */
-export function composeFocus(db: DbOrTx, now: Date, focus: Focus, budgetMin: number): ComposedSession {
-	const scheduler = createScheduler(settingsRepo(db).get());
+export function composeFocus(db: DbOrTx, profileId: number, now: Date, focus: Focus, budgetMin: number): ComposedSession {
+	const scheduler = createScheduler(learningSettingsRepo(db, profileId).get());
 	const retrievability = (card: CardRow) => retrievabilityOf(scheduler, card, now);
-	const book = reviewBookRepo(db);
+	const book = reviewBookRepo(db, profileId);
 	const picked =
 		focus.kind === 'hard'
 			? byHardness(book.hardCandidates(), retrievability).slice(0, HARD_FOCUS_CARDS)
 			: byTopicPriority(book.topicCandidates(focus.code), now, retrievability).slice(0, itemCount(budgetMin, 'quick'));
-	const details = new Map(clozeItemsRepo(db).forSession(picked.map((x) => x.card.clozeItemId!)).map((i) => [i.id, i]));
+	const details = new Map(learnerClozeRepo(db, profileId).forSession(picked.map((x) => x.card.clozeItemId!)).map((i) => [i.id, i]));
 	const entries = picked.flatMap((x) => {
 		const item = details.get(x.card.clozeItemId!);
 		return item === undefined ? [] : [{ card: x.card, item, sentenceId: item.sentenceId, gapType: item.gapType }];
 	});
-	const cards = cardsRepo(db);
+	const cards = cardsRepo(db, profileId);
 	const items: SessionItem[] = arrange(entries).map((e) => {
 		cards.setPromptMode(e.card.id, promptMode(e.card, e.gapType, e.item.typingOnly));
 		return toItem(e.card, e.item, now, scheduler);

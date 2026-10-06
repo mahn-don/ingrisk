@@ -4,6 +4,7 @@ import { evalMarkdown } from './eval.ts';
 
 const item = (id: number, validated: boolean): ClozeItemWithSentence => ({
 	id,
+	profileId: null,
 	sentenceId: id,
 	gapType: 'lexical',
 	tokenIndex: 3,

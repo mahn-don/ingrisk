@@ -3,9 +3,11 @@ import type { DbOrTx } from '../client.ts';
 import { type ServedItem, type ServedSession, type SessionSummary, sessions } from '../schema.ts';
 
 export type SessionRow = typeof sessions.$inferSelect;
-export type FinishedSession = Omit<typeof sessions.$inferInsert, 'id'>;
+export type FinishedSession = Omit<typeof sessions.$inferInsert, 'id' | 'profileId'>;
 
-export function sessionsRepo(db: DbOrTx) {
+/** One learner's study sessions: every query is limited to `profileId` (Phase 12). */
+export function sessionsRepo(db: DbOrTx, profileId: number) {
+	const mine = eq(sessions.profileId, profileId);
 	return {
 		/**
 		 * Record a finished session. Idempotent on client_session_id: a retried submission returns
@@ -13,32 +15,41 @@ export function sessionsRepo(db: DbOrTx) {
 		 */
 		recordFinished(payload: FinishedSession): { session: SessionRow; created: boolean } {
 			return db.transaction((tx) => {
-				const inserted = tx.insert(sessions).values(payload).onConflictDoNothing().returning().get();
+				const inserted = tx
+					.insert(sessions)
+					.values({ ...payload, profileId })
+					.onConflictDoNothing()
+					.returning()
+					.get();
 				if (inserted !== undefined) return { session: inserted, created: true };
 				const existing = tx
 					.select()
 					.from(sessions)
-					.where(eq(sessions.clientSessionId, payload.clientSessionId))
+					.where(and(mine, eq(sessions.clientSessionId, payload.clientSessionId)))
 					.get();
 				if (existing === undefined) throw new Error('session insert conflicted but no row found');
 				return { session: existing, created: false };
 			});
 		},
 		byId(id: number): SessionRow | undefined {
-			return db.select().from(sessions).where(eq(sessions.id, id)).get();
+			return db.select().from(sessions).where(and(mine, eq(sessions.id, id))).get();
 		},
+		/**
+		 * The session holding a client session id, whichever profile it belongs to: the id is
+		 * unique across profiles, and finish must refuse another profile's id rather than reuse it.
+		 */
 		byClientSessionId(clientSessionId: string): SessionRow | undefined {
 			return db.select().from(sessions).where(eq(sessions.clientSessionId, clientSessionId)).get();
 		},
 		inProgress(): SessionRow | undefined {
-			return db.select().from(sessions).where(eq(sessions.status, 'in_progress')).get();
+			return db.select().from(sessions).where(and(mine, eq(sessions.status, 'in_progress'))).get();
 		},
 		/** Abandon the session in progress, if any (its answers are lost). Returns how many. */
 		abandonInProgress(at: Date): number {
 			return db
 				.update(sessions)
 				.set({ status: 'abandoned', endedAt: at })
-				.where(eq(sessions.status, 'in_progress'))
+				.where(and(mine, eq(sessions.status, 'in_progress')))
 				.run().changes;
 		},
 		/** Start a session (in progress). `placeholderId` fills client_session_id until finish. */
@@ -46,6 +57,7 @@ export function sessionsRepo(db: DbOrTx) {
 			return db
 				.insert(sessions)
 				.values({
+					profileId,
 					clientSessionId: values.placeholderId,
 					startedAt: values.startedAt,
 					budgetMin: values.budgetMin,
@@ -67,7 +79,7 @@ export function sessionsRepo(db: DbOrTx) {
 					itemsDone: values.itemsDone,
 					summaryJson: values.summary
 				})
-				.where(and(eq(sessions.id, id), eq(sessions.status, 'in_progress')))
+				.where(and(mine, eq(sessions.id, id), eq(sessions.status, 'in_progress')))
 				.returning()
 				.get();
 			if (row === undefined) throw new Error(`session ${id} is not in progress`);
@@ -78,7 +90,7 @@ export function sessionsRepo(db: DbOrTx) {
 			return db
 				.select()
 				.from(sessions)
-				.where(and(eq(sessions.status, 'finished'), ne(sessions.shape, 'quick')))
+				.where(and(mine, eq(sessions.status, 'finished'), ne(sessions.shape, 'quick')))
 				.orderBy(desc(sessions.finishedAt), desc(sessions.id))
 				.limit(1)
 				.get();
@@ -88,7 +100,7 @@ export function sessionsRepo(db: DbOrTx) {
 			return db
 				.select()
 				.from(sessions)
-				.where(and(eq(sessions.status, 'finished'), eq(sessions.shape, 'write')))
+				.where(and(mine, eq(sessions.status, 'finished'), eq(sessions.shape, 'write')))
 				.orderBy(desc(sessions.finishedAt), desc(sessions.id))
 				.limit(1)
 				.get();
@@ -98,7 +110,7 @@ export function sessionsRepo(db: DbOrTx) {
 			return db
 				.select()
 				.from(sessions)
-				.where(and(eq(sessions.status, 'finished'), gte(sessions.finishedAt, from)))
+				.where(and(mine, eq(sessions.status, 'finished'), gte(sessions.finishedAt, from)))
 				.orderBy(asc(sessions.finishedAt))
 				.all();
 		},
@@ -107,7 +119,7 @@ export function sessionsRepo(db: DbOrTx) {
 			return db
 				.select({ finishedAt: sessions.finishedAt, endedAt: sessions.endedAt, startedAt: sessions.startedAt, itemsDone: sessions.itemsDone, summary: sessions.summaryJson })
 				.from(sessions)
-				.where(eq(sessions.status, 'finished'))
+				.where(and(mine, eq(sessions.status, 'finished')))
 				.orderBy(asc(sessions.id))
 				.all()
 				.map((r) => ({ finishedAt: r.finishedAt ?? r.endedAt ?? r.startedAt, itemsDone: r.itemsDone, studyMs: r.summary?.studyMs ?? 0 }));

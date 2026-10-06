@@ -17,6 +17,12 @@ export function isPublicPath(pathname: string): boolean {
 
 export const isApiPath = (pathname: string) => pathname === '/api' || pathname.startsWith('/api/');
 
+/**
+ * Logged in but no profile picked yet (Phase 12): every non-public path needs one, except the
+ * picker itself. Pages go to /profiles, /api answers 409. Not part of the public allowlist.
+ */
+export const needsProfile = (pathname: string) => !isPublicPath(pathname) && pathname !== '/profiles' && !pathname.startsWith('/profiles/');
+
 export type Access = 'allow' | 'login' | 'unauthorized' | 'not-configured';
 
 /**

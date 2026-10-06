@@ -1,4 +1,5 @@
 import { Rating } from 'ts-fsrs';
+import { TEST_PROFILE } from '../db/test-db.ts';
 import { describe, expect, it } from 'vitest';
 import { cardsRepo, type CardRow } from '../db/repositories/cards.ts';
 import { reviewLogsRepo } from '../db/repositories/review-logs.ts';
@@ -19,7 +20,7 @@ describe('mapping', () => {
 	it('round-trips cards losslessly in every state', () => {
 		const db = setupDb();
 		const id = addNewCard(db).id;
-		const states: Record<string, CardRow> = { New: cardsRepo(db).byId(id)! };
+		const states: Record<string, CardRow> = { New: cardsRepo(db, TEST_PROFILE).byId(id)! };
 		const steps: [Rating.Again | Rating.Good, number][] = [
 			[Rating.Again, 0], // New -> Learning
 			[Rating.Good, 1], // Learning -> Learning (10m step)
@@ -28,7 +29,7 @@ describe('mapping', () => {
 		];
 		for (const [rating, minutes] of steps) {
 			const at = new Date(T0.getTime() + minutes * MINUTE);
-			const { card } = review(db, id, rating, at, at, NO_FUZZ);
+			const { card } = review(db, TEST_PROFILE, id, rating, at, at, NO_FUZZ);
 			states[card.state] ??= card;
 		}
 		expect(Object.keys(states).sort()).toEqual(['Learning', 'New', 'Relearning', 'Review']);
@@ -36,8 +37,9 @@ describe('mapping', () => {
 			expect(fromFsrsCard(toFsrsCard(row), row)).toEqual(row);
 		}
 		// Every review log round-trips too.
-		for (const { id: logId, ...log } of reviewLogsRepo(db).forCard(id)) {
+		for (const { id: logId, profileId, ...log } of reviewLogsRepo(db, TEST_PROFILE).forCard(id)) {
 			expect(logId).toBeGreaterThan(0);
+			expect(profileId).toBe(TEST_PROFILE);
 			expect(fromFsrsReviewLog(toFsrsReviewLog(log), log)).toEqual(log);
 		}
 	});

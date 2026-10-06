@@ -1,4 +1,5 @@
 import type { RequestHandler } from './$types';
+import { profileIdOf } from '#lib/server/auth/profile.js';
 import { llmLimited } from '#lib/server/llm/route-limit.js';
 import { appEngineDeps } from '#lib/server/placement/app.js';
 import { submitPlacementWriting } from '#lib/server/placement/engine.js';
@@ -7,8 +8,9 @@ import { WritingBody, placementResponse, readBody } from '#lib/server/placement/
 // Part C: the writing sample (graded for up to 30 s) or `skip: true`; finishes the attempt.
 // LLM-backed: at most 60 requests per hour (src/lib/server/llm/route-limit.ts). Skipping the
 // writing calls no LLM and is never refused.
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, locals }) => {
+	const deps = appEngineDeps(profileIdOf(locals));
 	const skip = ((await request.clone().json().catch(() => null)) as { skip?: unknown } | null)?.skip === true;
-	const run = () => placementResponse(async () => submitPlacementWriting(appEngineDeps(), await readBody(request, WritingBody)));
+	const run = () => placementResponse(async () => submitPlacementWriting(deps, await readBody(request, WritingBody)));
 	return skip ? run() : llmLimited(run);
 };

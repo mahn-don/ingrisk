@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { TEST_PROFILE } from '../db/test-db.ts';
 import { cardsRepo } from '../db/repositories/cards.ts';
 import { sessionsRepo } from '../db/repositories/sessions.ts';
-import { settingsRepo } from '../db/repositories/settings.ts';
+import { learningSettingsRepo, settingsRepo } from '../db/repositories/settings.ts';
 import type { SessionSummary } from '../db/schema.ts';
 import { setup } from '../session/test-fixtures.ts';
 import { forecast, heatBucket, heatMap, weeklyGoal } from './calendar.ts';
@@ -142,10 +143,10 @@ describe('rankWeakness', () => {
 describe('loadProgress', () => {
 	it('reads the history: totals, streak and the forecast; suspended cards are out of the forecast', () => {
 		const fx = setup();
-		settingsRepo(fx.db).update({ weeklyGoalDays: 2 });
+		learningSettingsRepo(fx.db, TEST_PROFILE).update({ weeklyGoalDays: 2 });
 		const now = ict(0, 20);
 		for (const [i, day] of [-1, 0].entries()) {
-			sessionsRepo(fx.db).recordFinished({
+			sessionsRepo(fx.db, TEST_PROFILE).recordFinished({
 				clientSessionId: `progress-${i}`,
 				startedAt: ict(day, 9),
 				finishedAt: ict(day, 9, 5),
@@ -157,13 +158,13 @@ describe('loadProgress', () => {
 		}
 		const card = fx.addDueCard({ gapType: 'lexical', now });
 		fx.addDueCard({ gapType: 'article', now, state: 'Learning' });
-		const progress = loadProgress(fx.db, now);
+		const progress = loadProgress(fx.db, TEST_PROFILE, now);
 		expect(progress.streak).toMatchObject({ current: 2, studiedToday: true });
 		expect(progress.weekly.thisWeek).toMatchObject({ studiedDays: 1, goal: 2 });
 		expect(progress.totals).toEqual({ wordsLearned: 1, cardsInLearning: 1, minutes: 6, sessions: 2, minedAdded: 0, minedInReview: 0 });
 		expect(progress.forecast[0].due).toBe(2);
-		cardsRepo(fx.db).setSuspended(card.id, true);
-		expect(loadProgress(fx.db, now).forecast[0].due).toBe(1);
-		expect(loadToday(fx.db, now)).toMatchObject({ streak: { current: 2 }, thisWeek: { studiedDays: 1 }, minedWaiting: 0 });
+		cardsRepo(fx.db, TEST_PROFILE).setSuspended(card.id, true);
+		expect(loadProgress(fx.db, TEST_PROFILE, now).forecast[0].due).toBe(1);
+		expect(loadToday(fx.db, TEST_PROFILE, now)).toMatchObject({ streak: { current: 2 }, thisWeek: { studiedDays: 1 }, minedWaiting: 0 });
 	});
 });

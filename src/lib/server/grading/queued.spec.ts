@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TEST_PROFILE } from '../db/test-db.ts';
 import { placementRepo } from '../db/repositories/placement.ts';
 import { profileRepo } from '../db/repositories/profile.ts';
 import { writingRepo } from '../db/repositories/writing.ts';
@@ -22,7 +23,7 @@ describe('gradeQueuedWritings', () => {
 	it('grades a queued placement writing and refines the result and the profile', async () => {
 		const { fx, llm, requests } = cannedWorld();
 		const { resultId } = await queuedPlacement(fx.db);
-		const repo = placementRepo(fx.db);
+		const repo = placementRepo(fx.db, TEST_PROFILE);
 		const before = repo.result(resultId)!;
 		expect(before.writingStatus).toBe('queued');
 
@@ -33,8 +34,8 @@ describe('gradeQueuedWritings', () => {
 		// The canned grader answers with the CEFR of the level it is given (band 8 → B2).
 		expect(after).toMatchObject({ writingStatus: 'scored', subscoresJson: { writing: 'B2' } });
 		expect(after.itemLogJson).toEqual(before.itemLogJson);
-		expect(writingRepo(fx.db).byId(after.writingSubmissionId!)).toMatchObject({ status: 'scored', cefrEstimate: 'B2' });
-		expect(profileRepo(fx.db).get().writingTheta).toBe(4);
+		expect(writingRepo(fx.db, TEST_PROFILE).byId(after.writingSubmissionId!)).toMatchObject({ status: 'scored', cefrEstimate: 'B2' });
+		expect(profileRepo(fx.db, TEST_PROFILE).get().writingTheta).toBe(4);
 	});
 
 	it('does nothing (no budget, no call) when nothing is queued', async () => {
@@ -46,14 +47,14 @@ describe('gradeQueuedWritings', () => {
 	it('stops at the first LLM failure and leaves the rest queued', async () => {
 		const { fx, llm } = cannedWorld({ onRequest: () => 'invalid' });
 		await queuedPlacement(fx.db);
-		writingRepo(fx.db).queue({ sessionId: null, prompt: 'Viết về gia đình.', userText: 'I have a sister.', submittedAt: new Date(0) });
+		writingRepo(fx.db, TEST_PROFILE).queue({ sessionId: null, prompt: 'Viết về gia đình.', userText: 'I have a sister.', submittedAt: new Date(0) });
 		const summary = await gradeQueuedWritings({ maxCalls: 20 }, { llm, dailyCap: 100 });
 		expect(summary).toEqual({ graded: 0, failed: 1, remaining: 2 });
 	});
 
 	it('grades a queued translation against its reference, and mines its errors into cards', async () => {
 		const { fx, llm, requests } = cannedWorld();
-		const sub = writingRepo(fx.db).queue({
+		const sub = writingRepo(fx.db, TEST_PROFILE).queue({
 			sessionId: null,
 			prompt: 'Hôm qua chúng tôi mua cá.',
 			userText: 'Yesterday we buyed fish.',
@@ -63,12 +64,12 @@ describe('gradeQueuedWritings', () => {
 		});
 		expect(await gradeQueuedWritings({ maxCalls: 5 }, { llm, dailyCap: 100 })).toEqual({ graded: 1, failed: 0, remaining: 0 });
 		expect(requests.map((r) => r.purpose)).toEqual(['grade_translation']);
-		expect(writingRepo(fx.db).byId(sub.id)).toMatchObject({ status: 'scored', meaningOk: true, onTopic: null, minedCount: 1, correctedText: 'Yesterday we bought fish.' });
+		expect(writingRepo(fx.db, TEST_PROFILE).byId(sub.id)).toMatchObject({ status: 'scored', meaningOk: true, onTopic: null, minedCount: 1, correctedText: 'Yesterday we bought fish.' });
 	});
 
 	it('respects the call budget', async () => {
 		const { fx, llm } = cannedWorld();
-		for (const n of [1, 2]) writingRepo(fx.db).queue({ sessionId: null, prompt: 'Viết.', userText: `Text number ${n}.`, submittedAt: new Date(n) });
+		for (const n of [1, 2]) writingRepo(fx.db, TEST_PROFILE).queue({ sessionId: null, prompt: 'Viết.', userText: `Text number ${n}.`, submittedAt: new Date(n) });
 		expect(await gradeQueuedWritings({ maxCalls: 1 }, { llm, dailyCap: 100 })).toEqual({ graded: 1, failed: 0, remaining: 1 });
 	});
 });

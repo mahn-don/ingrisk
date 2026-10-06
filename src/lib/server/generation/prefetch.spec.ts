@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { TEST_PROFILE } from '../db/test-db.ts';
 import { authSessionsRepo } from '../db/repositories/auth-sessions.ts';
 import { llmCallsRepo } from '../db/repositories/llm-calls.ts';
+import { cardsRepo } from '../db/repositories/cards.ts';
+import { learnerClozeRepo } from '../db/repositories/cloze-items.ts';
+import { newCardFields } from '../srs/mapping.ts';
 import { profileRepo } from '../db/repositories/profile.ts';
+import { profilesRepo } from '../db/repositories/profiles.ts';
 import { writingRepo } from '../db/repositories/writing.ts';
 import { DailyCapError } from './budget.ts';
 import { DRILL_CODES } from './drills/build.ts';
@@ -47,7 +52,7 @@ describe('computeShortfall', () => {
 describe('prefetch', () => {
 	it('fills stock cheapest first and reports what it added', async () => {
 		const { fx, llm, context, requests } = cannedWorld();
-		expect(profileRepo(fx.db).get().knownBandCeiling).toBe(1); // bands 1-2
+		expect(profileRepo(fx.db, TEST_PROFILE).get().knownBandCeiling).toBe(1); // bands 1-2
 		const summary = await prefetch({ maxCalls: 100 }, { llm, context, dailyCap: 500, targets: { clozePerBand: 4, readingPerBand: 1, drillsPerTopicPerBand: 1 } });
 		expect(summary.steps).toEqual(['cloze', 'drill-injected', 'drill-llm', 'reading']);
 		const purposes = [...new Set(requests.map((r) => r.purpose))];
@@ -63,9 +68,43 @@ describe('prefetch', () => {
 		expect(levels.cloze.get(1)).toBeGreaterThanOrEqual(4);
 	});
 
+	it('reads one shared stock across every non-archived profile (Phase 12)', async () => {
+		const { fx, llm, context } = cannedWorld();
+		await prefetch({ maxCalls: 100 }, { llm, context, dailyCap: 500, targets: { clozePerBand: 4, readingPerBand: 0, drillsPerTopicPerBand: 0 } });
+		const profiles = profilesRepo(fx.db);
+		const second = profiles.create({ name: 'Hai', emoji: null }, new Date(0)).id;
+		const archived = profiles.create({ name: 'Cũ', emoji: null }, new Date(0)).id;
+		profileRepo(fx.db, second).update({ knownBandCeiling: 4 }, new Date(0));
+		profileRepo(fx.db, archived).update({ knownBandCeiling: 7 }, new Date(0));
+		profiles.archive(archived, new Date(0));
+		// The highest ceiling among the active profiles decides the bands (archived ones do not count).
+		expect(readStockLevels(fx.db).ceiling).toBe(4);
+		// Cloze stock is as full as it is for the learner with the fewest unused items.
+		const pool = learnerClozeRepo(fx.db, TEST_PROFILE).availableByBand().get(1)!;
+		expect(readStockLevels(fx.db).cloze.get(1)).toBe(pool);
+		// The second learner takes one band-1 item: the stock now counts one fewer; the first learner's count is unchanged.
+		const item = learnerClozeRepo(fx.db, second)
+			.newCardCandidates(1)
+			.find((c) => c.levelBand === 1)!;
+		cardsRepo(fx.db, second).insertIfAbsent({ kind: 'cloze', sentenceId: item.sentenceId, lexemeId: item.lexemeId, grammarTopicId: item.grammarTopicId, clozeItemId: item.id, ...newCardFields(new Date(0)) });
+		expect(learnerClozeRepo(fx.db, TEST_PROFILE).availableByBand().get(1)).toBe(pool);
+		expect(readStockLevels(fx.db).cloze.get(1)).toBe(pool - 1);
+	});
+
+	it('grades every profile\'s queued writings and logs each call for its learner', async () => {
+		const { fx, llm, context } = cannedWorld();
+		const second = profilesRepo(fx.db).create({ name: 'Hai', emoji: null }, new Date(0)).id;
+		writingRepo(fx.db, TEST_PROFILE).queue({ sessionId: null, prompt: 'Viết về gia đình.', userText: 'I have one sister.', submittedAt: new Date(0) });
+		writingRepo(fx.db, second).queue({ sessionId: null, prompt: 'Viết về gia đình.', userText: 'I have two brothers.', submittedAt: new Date(1) });
+		const summary = await prefetch({ maxCalls: 2 }, { llm, context, dailyCap: 500 });
+		expect(summary.writing).toEqual({ graded: 2, failed: 0, remaining: 0 });
+		const owners = fx.db.$client.prepare("select profile_id from llm_calls where purpose = 'grade_writing' order by id").pluck().all();
+		expect(owners).toEqual([TEST_PROFILE, second]);
+	});
+
 	it('grades queued writings before filling the stock, on the same budget', async () => {
 		const { fx, llm, context, requests } = cannedWorld();
-		writingRepo(fx.db).queue({ sessionId: null, prompt: 'Viết về gia đình.', userText: 'I have one sister.', submittedAt: new Date(0) });
+		writingRepo(fx.db, TEST_PROFILE).queue({ sessionId: null, prompt: 'Viết về gia đình.', userText: 'I have one sister.', submittedAt: new Date(0) });
 		const summary = await prefetch({ maxCalls: 2 }, { llm, context, dailyCap: 500 });
 		expect(summary.writing).toEqual({ graded: 1, failed: 0, remaining: 0 });
 		expect(requests[0].purpose).toBe('grade_writing');
@@ -76,8 +115,8 @@ describe('prefetch', () => {
 		const { fx, llm, context } = cannedWorld();
 		const now = llm.now();
 		const sessions = authSessionsRepo(fx.db);
-		sessions.insert({ id: 'expired', createdAt: new Date(now.getTime() - 40 * 86_400_000), expiresAt: new Date(now.getTime() - 1), lastSeenAt: new Date(0) });
-		sessions.insert({ id: 'valid', createdAt: now, expiresAt: new Date(now.getTime() + 86_400_000), lastSeenAt: now });
+		sessions.insert({ id: 'expired', createdAt: new Date(now.getTime() - 40 * 86_400_000), expiresAt: new Date(now.getTime() - 1), lastSeenAt: new Date(0), profileId: null });
+		sessions.insert({ id: 'valid', createdAt: now, expiresAt: new Date(now.getTime() + 86_400_000), lastSeenAt: now, profileId: null });
 		const summary = await prefetch({ maxCalls: 1 }, { llm, context, dailyCap: 500 });
 		expect(summary.expiredSessionsDeleted).toBe(1);
 		expect(sessions.get('expired')).toBeUndefined();

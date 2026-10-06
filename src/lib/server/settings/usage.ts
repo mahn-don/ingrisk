@@ -15,11 +15,15 @@ export interface UsageDay {
 	purposes: { purpose: string; calls: number; inputTokens: number; outputTokens: number }[];
 }
 
-/** The last 7 calendar days (today included, newest first), every day listed even without calls. */
-export function usageLastDays(db: DbOrTx, now: Date, days = USAGE_DAYS): UsageDay[] {
+/**
+ * The last 7 calendar days (today included, newest first), every day listed even without calls.
+ * With `profileId`: only the calls made for that learner (grading); shared content has no profile.
+ */
+export function usageLastDays(db: DbOrTx, now: Date, options: { days?: number; profileId?: number } = {}): UsageDay[] {
+	const days = options.days ?? USAGE_DAYS;
 	const todayStart = Math.floor((now.getTime() + ICT) / DAY) * DAY - ICT;
 	const since = new Date(todayStart - (days - 1) * DAY);
-	const rows = llmCallsRepo(db).usageByDay(since);
+	const rows = llmCallsRepo(db).usageByDay(since, options.profileId);
 	return Array.from({ length: days }, (_, i) => {
 		const day = new Date(todayStart - i * DAY + ICT).toISOString().slice(0, 10);
 		const byPurpose = new Map<string, UsageDay['purposes'][number]>();

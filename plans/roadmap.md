@@ -3,7 +3,7 @@
 Phase details and prompts live in Part III of `docs/architecture.md`. One phase per session, one
 commit per phase, `npm run verify` green before committing.
 
-**Build order after Phase 6 (the owner's decision): 8 → 9a → 9b → 10 → 7 → 11.** The deploy moves
+**Build order after Phase 6 (the owner's decision): 8 → 9a → 9b → 10 → 7 → 11 → 12.** The deploy moves
 after the features; the list below is in that order. Phase 9 is split in two (9a, 9b).
 
 - [x] **Phase 0 — Scaffold and guardrails:** a clean, verified skeleton showing a Vietnamese string from `messages/vi.ts`, with a hook that blocks committing secrets.
@@ -20,3 +20,4 @@ after the features; the list below is in that order. Phase 9 is split in two (9a
 - [x] **Phase 10 — Progress, review book, settings and providers:** the gentle motivation layer recomputed from history (streak with auto-freeze, weekly goal, heat-map, forecast, weakness profile), the review book with focus sessions and card suspension, full settings (learning, content stock and prefetch, AI usage, backup, credits) and provider management that never handles a key.
 - [x] **Phase 7 — Deploy to the VPS:** a hardened systemd unit run from the checkout (Node 24 on `0.0.0.0:3000`, plain HTTP), a one-time `sudo deploy/install.sh` with a minimal sudoers drop-in, a passwordless `deploy.sh` (ORIGIN-only build, pre-deploy snapshot, `/healthz` check), nightly verified snapshots and prefetch from the user's crontab, optional Litestream, and the runbook in `plans/phase-07.md`.
 - [x] **Phase 11 — Hardening:** stale-provider toasts, grading that shows 3 distinct error codes (all errors mined), reading coverage (everyday words, the band's word list, one rewrite), rule-based article gaps with a stricter critic, a phrase-aware content filter, a 60/hour limit on LLM routes, error states, an all-versions migration test and new eval fixtures (`plans/phase-11.md`).
+- [x] **Phase 12 — Learner profiles:** Netflix-style profiles behind the one password (`/profiles`: pick, create, rename, archive), each with its own placement, cards, history, streak and learning settings; migration 0010 gives every existing row to "Hồ sơ 1"; every per-learner query takes `profileId`, checked by a leakage test; one shared content stock for all profiles (`plans/phase-12.md`).

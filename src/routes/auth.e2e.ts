@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { E2E_CRON_SECRET, E2E_PASSWORD, SERVERS, expireSession, login } from '../../test/e2e/support.ts';
 
 test.describe('the hooks chokepoint', () => {
-	for (const path of ['/', '/stats', '/settings', '/session']) {
+	for (const path of ['/', '/stats', '/settings', '/session', '/profiles']) {
 		test(`unauthenticated ${path} redirects to /login?next=…`, async ({ request }) => {
 			const response = await request.get(path, { maxRedirects: 0 });
 			expect(response.status()).toBe(303);
@@ -66,11 +66,15 @@ test.describe('login and logout', () => {
 		await expect(page.getByRole('link', { name: 'Bắt đầu học' })).toHaveAttribute('href', '/session?budget=8&shape=quick');
 	});
 
-	test('a hostile next falls back to /', async ({ page }) => {
+	test('a hostile next falls back to /, which asks for a profile first', async ({ page }) => {
 		await page.goto('/login?next=//evil.com');
 		await page.getByLabel('Mật khẩu').fill(E2E_PASSWORD);
 		await page.getByRole('button', { name: 'Đăng nhập' }).click();
+		await expect(page).toHaveURL('/profiles');
+		await expect(page.getByRole('heading', { name: 'Ai đang học?', level: 1 })).toBeVisible();
+		await page.getByRole('button', { name: 'Học với hồ sơ Hồ sơ 1', exact: true }).click();
 		await expect(page).toHaveURL('/');
+		await expect(page.getByTestId('profile-current')).toHaveText('Hồ sơ: Hồ sơ 1');
 	});
 
 	test('logout ends the session', async ({ page, request }) => {

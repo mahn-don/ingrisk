@@ -18,11 +18,23 @@ export const SERVERS = {
 } as const;
 export const E2E_FAKE_PROVIDER_KEY = 'e2e-fake-provider-value-not-a-key';
 
-export async function login(page: Page, next = '/'): Promise<void> {
+/** The profile every database starts with (migration 0010). */
+export const FIRST_PROFILE = 'Hồ sơ 1';
+
+/** Log in, then pick a profile on /profiles (Phase 12); ends on `next`. Pass `profile: null` to stop at the picker. */
+export async function login(page: Page, next = '/', profile: string | null = FIRST_PROFILE): Promise<void> {
 	await page.goto(`/login?next=${encodeURIComponent(next)}`);
 	await page.getByLabel('Mật khẩu').fill(E2E_PASSWORD);
 	await page.getByRole('button', { name: 'Đăng nhập' }).click();
 	await page.waitForURL((url) => url.pathname !== '/login');
+	if (profile === null || new URL(page.url()).pathname !== '/profiles') return;
+	await pickProfile(page, profile);
+}
+
+/** On /profiles: learn as this profile (its card's accessible name is "Học với hồ sơ …"). */
+export async function pickProfile(page: Page, profile: string): Promise<void> {
+	await page.getByRole('button', { name: `Học với hồ sơ ${profile}`, exact: true }).click();
+	await page.waitForURL((url) => url.pathname !== '/profiles');
 }
 
 /** Move one session's expiry into the past, directly in the server's database. */
@@ -85,7 +97,7 @@ export function addDueCards(dbPath: string, count: number, options: { typing?: n
 }
 
 export function setNewCardsPerDay(dbPath: string, n: number): void {
-	withDb(dbPath, (db) => db.prepare('update settings set new_cards_per_day = ? where id = 1').run(n));
+	withDb(dbPath, (db) => db.prepare('update profile_settings set new_cards_per_day = ? where profile_id = 1').run(n));
 }
 
 /** Cards introduced (first reviewed) in the current learning day (from 04:00 Asia/Ho_Chi_Minh). */

@@ -1,4 +1,5 @@
 import { Rating } from 'ts-fsrs';
+import { TEST_PROFILE } from '../db/test-db.ts';
 import { describe, expect, it } from 'vitest';
 import { cardsRepo } from '../db/repositories/cards.ts';
 import { describeInterval, previewIntervals } from './preview.ts';
@@ -31,16 +32,16 @@ describe('previewIntervals', () => {
 		expect(preview[0].interval).toEqual({ value: 1, unit: 'minute' });
 		expect(preview[2].interval).toEqual({ value: 10, unit: 'minute' });
 		expect(preview[3].interval.unit).toBe('day');
-		expect(cardsRepo(db).byId(card.id)).toEqual(card);
+		expect(cardsRepo(db, TEST_PROFILE).byId(card.id)).toEqual(card);
 	});
 
 	it('matches what review() then does', () => {
 		const db = setupDb();
 		const id = addNewCard(db).id;
-		review(db, id, Rating.Good, T0, T0, NO_FUZZ);
-		const card = cardsRepo(db).byId(id)!;
+		review(db, TEST_PROFILE, id, Rating.Good, T0, T0, NO_FUZZ);
+		const card = cardsRepo(db, TEST_PROFILE).byId(id)!;
 		const preview = previewIntervals(card, card.due, createScheduler({ desiredRetention: 0.9 }, NO_FUZZ));
-		const { card: after } = review(db, id, Rating.Good, card.due, card.due, NO_FUZZ);
+		const { card: after } = review(db, TEST_PROFILE, id, Rating.Good, card.due, card.due, NO_FUZZ);
 		expect(preview[2].due).toEqual(after.due);
 	});
 });

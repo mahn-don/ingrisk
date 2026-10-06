@@ -2,7 +2,7 @@
 import type { Db } from '../db/client.ts';
 import { cardsRepo, type CardRow } from '../db/repositories/cards.ts';
 import { lexemes } from '../db/schema.ts';
-import { createTestDb } from '../db/test-db.ts';
+import { TEST_PROFILE, createTestDb } from '../db/test-db.ts';
 import { newCardFields } from './mapping.ts';
 
 /** 2026-10-05 09:00 in Asia/Ho_Chi_Minh. */
@@ -25,7 +25,7 @@ export function addNewCard(db: Db, now: Date = T0): CardRow {
 		.values({ headword: `word${counter}`, forms: [`word${counter}`], source: 'test', licenseTag: 'test' })
 		.returning()
 		.get();
-	const row = cardsRepo(db).insertIfAbsent({ kind: 'cloze', lexemeId: lexeme.id, ...newCardFields(now) });
+	const row = cardsRepo(db, TEST_PROFILE).insertIfAbsent({ kind: 'cloze', lexemeId: lexeme.id, ...newCardFields(now) });
 	if (row === undefined) throw new Error('card already exists');
 	return row;
 }

@@ -10,10 +10,11 @@ const logError = (message: string, error: unknown) => {
 	console.error(`${message}: ${e?.name ?? 'Error'}${e?.code ? ` (${e.code})` : ''}`);
 };
 
-export function appAnchorDeps(): AnchorDeps {
+export function appAnchorDeps(profileId: number): AnchorDeps {
 	const db = getDb();
 	return {
 		db,
+		profileId,
 		now: () => new Date(),
 		grade: llmConfigured(db) ? (submission, band) => gradeSubmission(submission, band, appLlmDeps(db)) : null,
 		logError

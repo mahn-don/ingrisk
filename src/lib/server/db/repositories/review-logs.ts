@@ -3,13 +3,18 @@ import type { DbOrTx } from '../client.ts';
 import { cards, clozeItems, reviewLogs } from '../schema.ts';
 
 export type ReviewLogRow = typeof reviewLogs.$inferSelect;
-export type NewReviewLog = Omit<typeof reviewLogs.$inferInsert, 'id'>;
+export type NewReviewLog = Omit<typeof reviewLogs.$inferInsert, 'id' | 'profileId'>;
 
-/** Append-only history of reviews; never updated or deleted. */
-export function reviewLogsRepo(db: DbOrTx) {
+/** One learner's append-only history of reviews; never updated or deleted (scoped: Phase 12). */
+export function reviewLogsRepo(db: DbOrTx, profileId: number) {
+	const mine = eq(reviewLogs.profileId, profileId);
 	return {
 		append(log: NewReviewLog): ReviewLogRow {
-			return db.insert(reviewLogs).values(log).returning().get();
+			return db
+				.insert(reviewLogs)
+				.values({ ...log, profileId })
+				.returning()
+				.get();
 		},
 		/**
 		 * Number of distinct cards first reviewed (pre-review state New) in [from, to): the cards
@@ -24,6 +29,7 @@ export function reviewLogsRepo(db: DbOrTx) {
 				.leftJoin(clozeItems, eq(clozeItems.id, cards.clozeItemId))
 				.where(
 					and(
+						mine,
 						eq(reviewLogs.state, 'New'),
 						gte(reviewLogs.review, from),
 						lt(reviewLogs.review, to),
@@ -39,7 +45,7 @@ export function reviewLogsRepo(db: DbOrTx) {
 				.select({ topic: cards.grammarTopicId, n: countDistinct(reviewLogs.id) })
 				.from(reviewLogs)
 				.innerJoin(cards, eq(cards.id, reviewLogs.cardId))
-				.where(and(eq(reviewLogs.rating, 'Again'), gte(reviewLogs.review, since), isNotNull(cards.grammarTopicId)))
+				.where(and(mine, eq(reviewLogs.rating, 'Again'), gte(reviewLogs.review, since), isNotNull(cards.grammarTopicId)))
 				.groupBy(cards.grammarTopicId)
 				.all();
 			return new Map(rows.map((r) => [r.topic!, r.n]));
@@ -56,7 +62,7 @@ export function reviewLogsRepo(db: DbOrTx) {
 				.from(reviewLogs)
 				.innerJoin(cards, eq(cards.id, reviewLogs.cardId))
 				.innerJoin(clozeItems, eq(clozeItems.id, cards.clozeItemId))
-				.where(and(gte(reviewLogs.review, since), isNotNull(cards.grammarTopicId)))
+				.where(and(mine, gte(reviewLogs.review, since), isNotNull(cards.grammarTopicId)))
 				.groupBy(cards.grammarTopicId, clozeItems.gapType)
 				.all();
 		},
@@ -65,7 +71,7 @@ export function reviewLogsRepo(db: DbOrTx) {
 			return db
 				.select()
 				.from(reviewLogs)
-				.where(eq(reviewLogs.cardId, cardId))
+				.where(and(mine, eq(reviewLogs.cardId, cardId)))
 				.orderBy(asc(reviewLogs.review), asc(reviewLogs.id))
 				.all();
 		}

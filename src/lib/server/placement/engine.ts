@@ -49,6 +49,8 @@ export interface WritingGradeRequest {
 
 export interface EngineDeps {
 	db: DbOrTx;
+	/** The learner taking the test (Phase 12). */
+	profileId: number;
 	now: () => Date;
 	content: PlacementContent;
 	/** Grades the writing sample; null when no LLM provider is configured. */
@@ -150,7 +152,7 @@ function serveB(state: State, deps: EngineDeps, pool: readonly PoolItem[]): void
 function enterB(state: State, deps: EngineDeps): void {
 	const score = scorePartA(state.a.blocks);
 	state.a.score = { vocabBand: score.vocabBand, falseAlarmRate: score.falseAlarmRate, unreliable: score.unreliable };
-	const pool = placementRepo(deps.db).clozePool();
+	const pool = placementRepo(deps.db, deps.profileId).clozePool();
 	if (!clozePoolSufficient(pool, score.vocabBand)) {
 		state.b = { skipped: true, theta: score.vocabBand, items: [] };
 		return enterC(state, deps);
@@ -202,7 +204,7 @@ function view(attempt: PlacementAttempt, state: State, deps: EngineDeps): Placem
 	if (state.part === 'B') {
 		const b = state.b!;
 		const current = b.items.at(-1)!;
-		const [item] = placementRepo(deps.db).clozeItems([current.id]);
+		const [item] = placementRepo(deps.db, deps.profileId).clozeItems([current.id]);
 		if (item === undefined) throw new Error(`cloze item ${current.id} disappeared`);
 		const token = tokenize(item.enText)[item.tokenIndex];
 		return {
@@ -232,13 +234,13 @@ const stateOf = (attempt: PlacementAttempt) => attempt.stateJson as State;
 
 /** The attempt in progress, ready to resume; null when there is none. */
 export function currentPlacement(deps: EngineDeps): PlacementView | null {
-	const attempt = placementRepo(deps.db).inProgress();
+	const attempt = placementRepo(deps.db, deps.profileId).inProgress();
 	return attempt === undefined ? null : view(attempt, stateOf(attempt), deps);
 }
 
 /** Resume the attempt in progress, or start one. `restart` abandons the one in progress first. */
 export function startPlacement(deps: EngineDeps, options: { restart?: boolean } = {}): PlacementView {
-	const repo = placementRepo(deps.db);
+	const repo = placementRepo(deps.db, deps.profileId);
 	const existing = repo.inProgress();
 	if (existing !== undefined && options.restart !== true) return view(existing, stateOf(existing), deps);
 	const now = deps.now();
@@ -262,7 +264,7 @@ export function startPlacement(deps: EngineDeps, options: { restart?: boolean } 
 }
 
 function loadForAnswer(deps: EngineDeps, attemptId: number): { attempt: PlacementAttempt; state: State } {
-	const attempt = placementRepo(deps.db).attempt(attemptId);
+	const attempt = placementRepo(deps.db, deps.profileId).attempt(attemptId);
 	if (attempt === undefined) throw new PlacementError(404, 'not_found', 'no such attempt');
 	return { attempt, state: stateOf(attempt) };
 }
@@ -307,7 +309,7 @@ export function answerPlacement(deps: EngineDeps, input: AnswerInput): Placement
 	} else {
 		const b = state.b!;
 		const current = b.items.at(-1)!;
-		const [item] = placementRepo(deps.db).clozeItems([current.id]);
+		const [item] = placementRepo(deps.db, deps.profileId).clozeItems([current.id]);
 		const index = input.answer;
 		if (typeof index !== 'number' || !Number.isInteger(index) || item === undefined || index < 0 || index >= item.options.length) {
 			throw new PlacementError(400, 'invalid', 'Part B answers are an option index');
@@ -318,15 +320,15 @@ export function answerPlacement(deps: EngineDeps, input: AnswerInput): Placement
 		b.theta = updateTheta(b.theta, current.band, correct, b.items.length - 1);
 		state.lastRef = state.current.ref;
 		if (b.items.length >= PART_B_ITEMS) enterC(state, deps);
-		else serveB(state, deps, placementRepo(deps.db).clozePool());
+		else serveB(state, deps, placementRepo(deps.db, deps.profileId).clozePool());
 	}
-	placementRepo(deps.db).saveAttempt(attempt.id, { part: state.part, stateJson: state });
+	placementRepo(deps.db, deps.profileId).saveAttempt(attempt.id, { part: state.part, stateJson: state });
 	return view(attempt, state, deps);
 }
 
 /** Finish the attempt: the result row, the attempt completed, the profile updated. */
 function finish(deps: EngineDeps, attempt: PlacementAttempt, state: State, writingSubmissionId: number | null): number {
-	const repo = placementRepo(deps.db);
+	const repo = placementRepo(deps.db, deps.profileId);
 	const now = deps.now();
 	const score = state.a.score!;
 	const result = repo.insertResult(
@@ -345,7 +347,7 @@ function finish(deps: EngineDeps, attempt: PlacementAttempt, state: State, writi
 	);
 	state.lastRef = state.current.ref;
 	repo.completeAttempt(attempt.id, result.id, now, state);
-	applyResultToProfile(deps.db, result, now);
+	applyResultToProfile(deps.db, deps.profileId, result, now);
 	return result.id;
 }
 
@@ -366,7 +368,7 @@ export async function submitPlacementWriting(deps: EngineDeps, input: WritingInp
 	const text = input.text.trim();
 	if (countWords(text) === 0 || text.length > MAX_WRITING_CHARS) throw new PlacementError(400, 'invalid', 'empty or too long');
 	const prompt = deps.content.prompts.find((p) => p.id === state.c!.promptId)!;
-	const submission = writingRepo(deps.db).queue({ sessionId: null, prompt: prompt.prompt_vi, userText: text, submittedAt: deps.now() });
+	const submission = writingRepo(deps.db, deps.profileId).queue({ sessionId: null, prompt: prompt.prompt_vi, userText: text, submittedAt: deps.now() });
 	const resultId = finish(deps, attempt, state, submission.id);
 	if (deps.grade !== null) await gradeWithin(deps, submission.id, { prompt_vi: prompt.prompt_vi, user_text: text, level_band: state.c!.band });
 	return { resultId };
@@ -375,7 +377,7 @@ export async function submitPlacementWriting(deps: EngineDeps, input: WritingInp
 async function gradeWithin(deps: EngineDeps, submissionId: number, request: WritingGradeRequest): Promise<void> {
 	const graded = deps.grade!(request).then(
 		(grade) => {
-			applyWritingGrade(deps.db, submissionId, grade, deps.now());
+			applyWritingGrade(deps.db, deps.profileId, submissionId, grade, deps.now());
 		},
 		(error: unknown) => deps.logError?.('placement writing not graded; it stays queued', error)
 	);
@@ -388,7 +390,7 @@ async function gradeWithin(deps: EngineDeps, submissionId: number, request: Writ
 }
 
 /** For Home: whether to offer the test, resume it, or nothing. */
-export function placementOverview(db: DbOrTx): { completed: boolean; inProgress: boolean } {
-	const repo = placementRepo(db);
+export function placementOverview(db: DbOrTx, profileId: number): { completed: boolean; inProgress: boolean } {
+	const repo = placementRepo(db, profileId);
 	return { completed: repo.resultCount() > 0, inProgress: repo.inProgress() !== undefined };
 }

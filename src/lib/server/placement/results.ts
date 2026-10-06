@@ -1,7 +1,7 @@
 // Placement results: building the row from a finished attempt, refining it when the writing is
 // graded later, the profile update, and the view the result page shows.
 import type { DbOrTx } from '../db/client.ts';
-import { type PlacementResult, placementRepo } from '../db/repositories/placement.ts';
+import { type NewPlacementResult, type PlacementResult, placementRepo } from '../db/repositories/placement.ts';
 import { profileRepo } from '../db/repositories/profile.ts';
 import type { PartScore, PlacementLogEntry, PlacementSubscores, ReliabilityFlag, WritingError } from '../db/schema.ts';
 import { combine } from './combine.ts';
@@ -35,7 +35,7 @@ const tally = (entries: readonly PlacementLogEntry[]): PartScore | null =>
 	entries.length === 0 ? null : { correct: entries.filter((e) => e.correct).length, total: entries.length };
 
 /** The result row for a finished attempt (writing not graded yet). */
-export function buildResult(parts: FinishedParts, takenAt: Date): Omit<PlacementResult, 'id'> {
+export function buildResult(parts: FinishedParts, takenAt: Date): NewPlacementResult {
 	const combined = combine({ vocabBand: parts.vocabBand, clozeTheta: parts.clozeTheta, writing: null });
 	const b = parts.log.filter((e) => e.part === 'B');
 	const typeOf = (e: PlacementLogEntry) => parts.clozeTypes.get(Number(e.item));
@@ -94,10 +94,10 @@ export function refineResult(result: PlacementResult, writing: Cefr): Partial<Pl
  * Copy a result into user_profile. Only the latest result counts: refining an older one (a
  * retake happened meanwhile) leaves the profile alone.
  */
-export function applyResultToProfile(db: DbOrTx, result: PlacementResult, now: Date): boolean {
-	if (placementRepo(db).latestResult()?.id !== result.id) return false;
+export function applyResultToProfile(db: DbOrTx, profileId: number, result: PlacementResult, now: Date): boolean {
+	if (placementRepo(db, profileId).latestResult()?.id !== result.id) return false;
 	const eq: Equivalents = equivalents(result.cefr);
-	profileRepo(db).update(
+	profileRepo(db, profileId).update(
 		{
 			theta: result.theta,
 			cefrEstimate: result.cefr,
@@ -129,8 +129,8 @@ export interface PlacementResultView {
 	previous: { id: number; takenAt: number; cefr: Cefr; abilityBand: number } | null;
 }
 
-export function resultView(db: DbOrTx, id: number): PlacementResultView | null {
-	const repo = placementRepo(db);
+export function resultView(db: DbOrTx, profileId: number, id: number): PlacementResultView | null {
+	const repo = placementRepo(db, profileId);
 	const result = repo.result(id);
 	if (result === undefined) return null;
 	const previous = repo.previousResult(id);

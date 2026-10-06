@@ -5,12 +5,12 @@ import { randomUUID } from 'node:crypto';
 import type { DbOrTx } from '../db/client.ts';
 import { cacheRepo } from '../db/repositories/cache.ts';
 import { cardsRepo } from '../db/repositories/cards.ts';
-import { clozeItemsRepo } from '../db/repositories/cloze-items.ts';
+import { learnerClozeRepo } from '../db/repositories/cloze-items.ts';
 import { drillResultsRepo } from '../db/repositories/drill-results.ts';
 import { sentencesRepo } from '../db/repositories/sentences.ts';
 import { profileRepo } from '../db/repositories/profile.ts';
 import { type SessionRow, sessionsRepo } from '../db/repositories/sessions.ts';
-import { settingsRepo } from '../db/repositories/settings.ts';
+import { learningSettingsRepo } from '../db/repositories/settings.ts';
 import { type WritingSubmission, writingRepo } from '../db/repositories/writing.ts';
 import { type ServedSession, servedOf } from '../db/schema.ts';
 import { type GradedWriting, applyWritingGrade } from '../grading/apply.ts';
@@ -50,24 +50,24 @@ export class SessionError extends Error {
  * Unseen graded feedback comes first. An empty composition stores nothing and returns the reason.
  * A focus (the hardest cards, or one grammar topic) makes a Nhanh session of existing cards only.
  */
-export function startSession(db: DbOrTx, now: Date, options: { budgetMin?: number; shape?: SessionShape; focus?: Focus } = {}): StartResponse {
+export function startSession(db: DbOrTx, profileId: number, now: Date, options: { budgetMin?: number; shape?: SessionShape; focus?: Focus } = {}): StartResponse {
 	const { focus } = options;
 	if (focus !== undefined && options.shape !== undefined && options.shape !== 'quick') {
 		throw new SessionError(400, 'invalid', 'a focus session is always quick');
 	}
 	return db.transaction((tx) => {
-		const sessions = sessionsRepo(tx);
+		const sessions = sessionsRepo(tx, profileId);
 		sessions.abandonInProgress(now);
-		const budgetMin = options.budgetMin ?? settingsRepo(tx).get().defaultSessionBudget;
-		const shape = focus === undefined ? resolveShape(shapeContext(tx, budgetMin), options.shape) : 'quick';
+		const budgetMin = options.budgetMin ?? learningSettingsRepo(tx, profileId).get().defaultSessionBudget;
+		const shape = focus === undefined ? resolveShape(shapeContext(tx, profileId, budgetMin), options.shape) : 'quick';
 		if (shape === null) throw new SessionError(400, 'shape_unavailable', `shape ${options.shape} is not available now`);
-		const feedback = unseenFeedbackCards(tx);
-		const band = profileRepo(tx).get().knownBandCeiling;
+		const feedback = unseenFeedbackCards(tx, profileId);
+		const band = profileRepo(tx, profileId).get().knownBandCeiling;
 		const seed = String(now.getTime());
 
-		const composed = focus === undefined ? composeSession(tx, now, { budgetMin, shape }) : composeFocus(tx, now, focus, budgetMin);
-		const drills = focus?.kind === 'topic' ? takeTopicDrills(tx, now, band, focus.code) : shape === 'quick' ? [] : takeDrills(tx, now, band, seed);
-		const anchored = focus !== undefined ? null : shape === 'read' ? readingAnchor(tx, now, band) : shape === 'write' ? writeAnchor(tx, now, band, seed) : null;
+		const composed = focus === undefined ? composeSession(tx, profileId, now, { budgetMin, shape }) : composeFocus(tx, profileId, now, focus, budgetMin);
+		const drills = focus?.kind === 'topic' ? takeTopicDrills(tx, now, band, focus.code) : shape === 'quick' ? [] : takeDrills(tx, profileId, now, band, seed);
+		const anchored = focus !== undefined ? null : shape === 'read' ? readingAnchor(tx, profileId, now, band) : shape === 'write' ? writeAnchor(tx, profileId, now, band, seed) : null;
 		if (composed.items.length === 0 && drills.length === 0 && anchored === null) {
 			return { sessionId: null, startedAt: now.getTime(), shape, items: [], drills: [], anchor: null, feedback, reason: composed.reason ?? 'all_done' };
 		}
@@ -81,8 +81,8 @@ export function startSession(db: DbOrTx, now: Date, options: { budgetMin?: numbe
 	});
 }
 
-function inProgress(db: DbOrTx, sessionId: number): SessionRow {
-	const session = sessionsRepo(db).byId(sessionId);
+function inProgress(db: DbOrTx, profileId: number, sessionId: number): SessionRow {
+	const session = sessionsRepo(db, profileId).byId(sessionId);
 	if (session === undefined) throw new SessionError(404, 'not_found', 'no such session');
 	if (session.status !== 'in_progress') throw new SessionError(409, 'not_in_progress', `session is ${session.status}`);
 	return session;
@@ -90,6 +90,8 @@ function inProgress(db: DbOrTx, sessionId: number): SessionRow {
 
 export interface AnchorDeps {
 	db: DbOrTx;
+	/** The learner submitting (Phase 12). */
+	profileId: number;
 	now: () => Date;
 	/** Grades a submission; null when no provider is configured (the writing stays queued). */
 	grade: ((submission: WritingSubmission, levelBand: number) => Promise<GradedWriting>) | null;
@@ -104,9 +106,9 @@ export interface AnchorDeps {
  * submit returns what the first one produced.
  */
 export async function submitAnchor(deps: AnchorDeps, input: { sessionId: number; text: string }): Promise<AnchorResponse> {
-	const { db } = deps;
-	const writing = writingRepo(db);
-	const session = inProgress(db, input.sessionId);
+	const { db, profileId } = deps;
+	const writing = writingRepo(db, profileId);
+	const session = inProgress(db, profileId, input.sessionId);
 	const anchor = servedOf(session.servedJson).anchor;
 	if (anchor === null || anchor.type === 'reading') throw new SessionError(400, 'invalid', 'this session has no writing task');
 	const existing = writing.forSession(session.id);
@@ -116,7 +118,7 @@ export async function submitAnchor(deps: AnchorDeps, input: { sessionId: number;
 	const text = input.text.trim();
 	if (!/[A-Za-z]/.test(text) || text.length > MAX_ANCHOR_CHARS) throw new SessionError(400, 'invalid', 'empty or too long');
 
-	const band = profileRepo(db).get().knownBandCeiling;
+	const band = profileRepo(db, profileId).get().knownBandCeiling;
 	let submission;
 	if (anchor.type === 'writing') {
 		const prompt = readWritingPrompts().find((p) => p.id === anchor.promptId);
@@ -137,7 +139,7 @@ export async function submitAnchor(deps: AnchorDeps, input: { sessionId: number;
 
 	const queued = submission;
 	const graded = deps.grade(queued, band).then(
-		(grade) => applyWritingGrade(db, queued.id, grade, deps.now()),
+		(grade) => applyWritingGrade(db, profileId, queued.id, grade, deps.now()),
 		(error: unknown) => {
 			deps.logError?.('session writing not graded; it stays queued', error);
 			return 'error' as const;
@@ -159,15 +161,15 @@ export async function submitAnchor(deps: AnchorDeps, input: { sessionId: number;
  * "Thêm vào ôn tập" on a glossary word of the session's passage: create the card (state New) for
  * the validated cloze item found at start. It is introduced within the daily new-card limit.
  */
-export function addGlossaryCard(db: DbOrTx, now: Date, input: { sessionId: number; word: string }): { cardId: number } {
+export function addGlossaryCard(db: DbOrTx, profileId: number, now: Date, input: { sessionId: number; word: string }): { cardId: number } {
 	return db.transaction((tx) => {
-		const session = inProgress(tx, input.sessionId);
+		const session = inProgress(tx, profileId, input.sessionId);
 		const anchor = servedOf(session.servedJson).anchor;
 		const itemId = anchor?.type === 'reading' ? anchor.glossary[input.word] : undefined;
 		if (itemId === undefined || itemId === null) throw new SessionError(409, 'not_addable', 'no review item for this word');
-		const item = clozeItemsRepo(tx).byId(itemId);
+		const item = learnerClozeRepo(tx, profileId).byId(itemId);
 		if (item === undefined) throw new SessionError(409, 'not_addable', 'no review item for this word');
-		const card = cardsRepo(tx).insertIfAbsent({
+		const card = cardsRepo(tx, profileId).insertIfAbsent({
 			kind: 'cloze',
 			lexemeId: item.lexemeId,
 			sentenceId: item.sentenceId,
@@ -182,8 +184,8 @@ export function addGlossaryCard(db: DbOrTx, now: Date, input: { sessionId: numbe
 }
 
 /** A feedback card was dismissed: do not show it again. */
-export function markFeedbackSeen(db: DbOrTx, now: Date, submissionId: number): void {
-	const writing = writingRepo(db);
+export function markFeedbackSeen(db: DbOrTx, profileId: number, now: Date, submissionId: number): void {
+	const writing = writingRepo(db, profileId);
 	const submission = writing.byId(submissionId);
 	if (submission === undefined || submission.status !== 'scored') throw new SessionError(404, 'not_found', 'no such feedback');
 	if (submission.feedbackSeenAt === null) writing.markSeen(submissionId, now);
@@ -232,7 +234,7 @@ export function validateResults(session: SessionRow, request: FinishRequest, now
 	return reviews;
 }
 
-function anchorOutcome(db: DbOrTx, session: SessionRow, request: FinishRequest): AnchorOutcome | null {
+function anchorOutcome(db: DbOrTx, profileId: number, session: SessionRow, request: FinishRequest): AnchorOutcome | null {
 	const served = servedOf(session.servedJson).anchor;
 	if (served === null) return null;
 	if (served.type === 'reading') {
@@ -241,7 +243,7 @@ function anchorOutcome(db: DbOrTx, session: SessionRow, request: FinishRequest):
 		const correct = answers.filter((a, i) => payload?.questions[i]?.answer_index === a).length;
 		return { type: 'reading', correct, total: served.questions };
 	}
-	const submission = writingRepo(db).forSession(session.id);
+	const submission = writingRepo(db, profileId).forSession(session.id);
 	return { type: served.type, status: submission === undefined ? 'skipped' : submission.status === 'scored' ? 'scored' : 'queued' };
 }
 
@@ -251,19 +253,19 @@ function anchorOutcome(db: DbOrTx, session: SessionRow, request: FinishRequest):
  * stored summary without applying anything again. A partial finish (ended early) sends only the
  * answered items.
  */
-export function finishSession(db: DbOrTx, now: Date, request: FinishRequest): FinishSummary {
+export function finishSession(db: DbOrTx, profileId: number, now: Date, request: FinishRequest): FinishSummary {
 	return db.transaction((tx) => {
-		const sessions = sessionsRepo(tx);
+		const sessions = sessionsRepo(tx, profileId);
 		const byClient = sessions.byClientSessionId(request.clientSessionId);
 		if (byClient !== undefined) {
 			if (byClient.id === request.sessionId && byClient.status === 'finished' && byClient.summaryJson !== null) return byClient.summaryJson;
 			throw new SessionError(409, 'client_id_taken', 'clientSessionId belongs to another session');
 		}
-		const session = inProgress(tx, request.sessionId);
+		const session = inProgress(tx, profileId, request.sessionId);
 		const reviews = validateResults(session, request, now);
 		let applied;
 		try {
-			applied = reviewBatch(tx, reviews, now);
+			applied = reviewBatch(tx, profileId, reviews, now);
 		} catch (error) {
 			if (error instanceof ReviewTimeError) throw new SessionError(409, 'review_rejected', error.message);
 			throw error;
@@ -271,7 +273,7 @@ export function finishSession(db: DbOrTx, now: Date, request: FinishRequest): Fi
 		const served = servedOf(session.servedJson);
 		const topics = new Map(served.drills.map((d) => [d.cacheId, d.topicCode]));
 		for (const d of request.drills ?? []) {
-			drillResultsRepo(tx).insert({ sessionId: session.id, cacheId: d.cacheId, topicCode: topics.get(d.cacheId)!, correct: d.correct, answeredAt: now });
+			drillResultsRepo(tx, profileId).insert({ sessionId: session.id, cacheId: d.cacheId, topicCode: topics.get(d.cacheId)!, correct: d.correct, answeredAt: now });
 		}
 		const clamp = (ms: number) => Math.min(MAX_RESPONSE_MS, Math.max(0, ms));
 		const correct = request.results.filter((r) => r.correct).length;
@@ -284,14 +286,14 @@ export function finishSession(db: DbOrTx, now: Date, request: FinishRequest): Fi
 			// A first review raises stability from 0 even when wrong, so new cards do not count.
 			strengthened: applied.filter((r) => r.log.state !== 'New' && r.log.newS > r.log.oldS).length,
 			newIntroduced: applied.filter((r) => r.log.state === 'New').length,
-			nextDueAt: cardsRepo(tx).earliestIntroducedDue()?.getTime() ?? null,
+			nextDueAt: cardsRepo(tx, profileId).earliestIntroducedDue()?.getTime() ?? null,
 			studyMs,
 			todayMinutes: Math.round((earlierToday + studyMs) / 60_000),
 			shape: session.shape,
-			anchor: anchorOutcome(tx, session, request),
+			anchor: anchorOutcome(tx, profileId, session, request),
 			drillsCorrect: (request.drills ?? []).filter((d) => d.correct).length,
 			drillsTotal: served.drills.length,
-			minedErrors: writingRepo(tx).forSession(session.id)?.minedCount ?? 0
+			minedErrors: writingRepo(tx, profileId).forSession(session.id)?.minedCount ?? 0
 		};
 		sessions.markFinished(session.id, { clientSessionId: request.clientSessionId, finishedAt: now, itemsDone: request.results.length, summary });
 		return summary;

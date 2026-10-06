@@ -3,7 +3,8 @@
 import { Rating, type Grade } from 'ts-fsrs';
 import { createDb, migrate } from '../src/lib/server/db/client.ts';
 import { cardsRepo } from '../src/lib/server/db/repositories/cards.ts';
-import { settingsRepo } from '../src/lib/server/db/repositories/settings.ts';
+import { FIRST_PROFILE_ID } from '../src/lib/server/db/repositories/profiles.ts';
+import { learningSettingsRepo } from '../src/lib/server/db/repositories/settings.ts';
 import { lexemes } from '../src/lib/server/db/schema.ts';
 import { describeInterval } from '../src/lib/server/srs/preview.ts';
 import { newCardFields, ratingName } from '../src/lib/server/srs/mapping.ts';
@@ -36,7 +37,7 @@ const lexeme = db
 	.values({ headword: 'walkthrough', forms: ['walkthrough'], source: 'tool', licenseTag: 'none' })
 	.returning()
 	.get();
-const created = cardsRepo(db).insertIfAbsent({ kind: 'cloze', lexemeId: lexeme.id, ...newCardFields(START) });
+const created = cardsRepo(db, FIRST_PROFILE_ID).insertIfAbsent({ kind: 'cloze', lexemeId: lexeme.id, ...newCardFields(START) });
 if (created === undefined) throw new Error('could not create the card');
 
 const ictTime = (date: Date) =>
@@ -45,7 +46,7 @@ const ictTime = (date: Date) =>
 const rows: string[][] = [['step', 'rating', 'reviewed at (ICT)', 'state after', 'next interval', 'stability', 'difficulty']];
 let at = created.due;
 SEQUENCE.forEach((rating, i) => {
-	const { card } = review(db, created.id, rating, at, at, { fuzz: false });
+	const { card } = review(db, FIRST_PROFILE_ID, created.id, rating, at, at, { fuzz: false });
 	const interval = describeInterval(card.due.getTime() - at.getTime());
 	rows.push([
 		String(i + 1),
@@ -61,7 +62,7 @@ SEQUENCE.forEach((rating, i) => {
 
 const widths = rows[0].map((_, col) => Math.max(...rows.map((r) => r[col].length)));
 const line = (r: string[]) => `| ${r.map((cell, col) => cell.padEnd(widths[col])).join(' | ')} |`;
-console.log(`desired retention ${settingsRepo(db).get().desiredRetention}, fuzz off`);
+console.log(`desired retention ${learningSettingsRepo(db, FIRST_PROFILE_ID).get().desiredRetention}, fuzz off`);
 console.log(line(rows[0]));
 console.log(`|${widths.map((w) => '-'.repeat(w + 2)).join('|')}|`);
 for (const r of rows.slice(1)) console.log(line(r));

@@ -19,7 +19,8 @@ export interface BookCard {
 }
 
 /** Read-only queries behind the review book ("Sổ ôn tập") and the focus sessions. */
-export function reviewBookRepo(db: DbOrTx) {
+export function reviewBookRepo(db: DbOrTx, profileId: number) {
+	const mine = eq(cards.profileId, profileId);
 	const base = () =>
 		db
 			.select({
@@ -43,7 +44,7 @@ export function reviewBookRepo(db: DbOrTx) {
 		/** Cards often wrong: any lapse, plus every mined error (suspended ones too: the book shows them). */
 		oftenWrong(): BookCard[] {
 			return base()
-				.where(or(gt(cards.lapses, 0), eq(clozeItems.gapType, 'user_error')))
+				.where(and(mine, or(gt(cards.lapses, 0), eq(clozeItems.gapType, 'user_error'))))
 				.all();
 		},
 		/** Every introduced card, optionally filtered by English, answer or Vietnamese text. */
@@ -54,6 +55,7 @@ export function reviewBookRepo(db: DbOrTx) {
 			return base()
 				.where(
 					and(
+						mine,
 						ne(cards.state, 'New'),
 						q === '' ? undefined : or(match(sentences.enText), match(clozeItems.answer), match(sentences.viText), match(clozeItems.answerVi))
 					)
@@ -63,18 +65,18 @@ export function reviewBookRepo(db: DbOrTx) {
 				.all();
 		},
 		byCardId(cardId: number): BookCard | undefined {
-			return base().where(eq(cards.id, cardId)).get();
+			return base().where(and(mine, eq(cards.id, cardId))).get();
 		},
 		/** Candidates for the "hard" focus session: not suspended, reviewed at least once or mined. */
 		hardCandidates(): BookCard[] {
 			return base()
-				.where(and(eq(cards.suspended, false), or(ne(cards.state, 'New'), eq(clozeItems.gapType, 'user_error'))))
+				.where(and(mine, eq(cards.suspended, false), or(ne(cards.state, 'New'), eq(clozeItems.gapType, 'user_error'))))
 				.all();
 		},
 		/** Candidates for a topic focus session: not suspended, introduced, of this grammar topic. */
 		topicCandidates(topicCode: (typeof TOPIC_CODES)[number]): BookCard[] {
 			return base()
-				.where(and(eq(cards.suspended, false), ne(cards.state, 'New'), eq(grammarTopics.code, topicCode)))
+				.where(and(mine, eq(cards.suspended, false), ne(cards.state, 'New'), eq(grammarTopics.code, topicCode)))
 				.all();
 		}
 	};

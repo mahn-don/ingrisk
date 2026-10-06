@@ -2,9 +2,10 @@
 import type { DbOrTx } from '../db/client.ts';
 import { authSessionsRepo } from '../db/repositories/auth-sessions.ts';
 import { cacheRepo } from '../db/repositories/cache.ts';
-import { clozeItemsRepo } from '../db/repositories/cloze-items.ts';
+import { clozeItemsRepo, learnerClozeRepo } from '../db/repositories/cloze-items.ts';
 import type { UsageEntry } from '../db/repositories/llm-calls.ts';
 import { profileRepo } from '../db/repositories/profile.ts';
+import { profilesRepo } from '../db/repositories/profiles.ts';
 import { type QueuedGradingSummary, gradeQueuedWritings } from '../grading/queued.ts';
 import type { LlmDeps } from '../llm/client.ts';
 import { type RunBudget, startBudget } from './budget.ts';
@@ -36,8 +37,9 @@ export interface Shortfall {
 }
 
 export interface StockLevels {
-	/** known_band_ceiling from the learner profile. */
+	/** The highest known_band_ceiling across the non-archived profiles (Phase 12). */
 	ceiling: number;
+	/** Per band: validated shared items the most-served learner has no card for yet (the minimum across profiles). */
 	cloze: ReadonlyMap<number, number>;
 	/** Key "TOPIC|band". */
 	drills: ReadonlyMap<string, number>;
@@ -74,7 +76,21 @@ export function orderCheapestFirst(shortfalls: readonly Shortfall[]): Shortfall[
 	);
 }
 
-/** Current stock levels from the database. */
+/**
+ * Cloze stock is shared, but "available" depends on the learner (items they already have a card
+ * for are used up): the stock is as full as it is for the learner with the fewest items left.
+ */
+function sharedClozeAvailable(db: DbOrTx, learners: readonly number[], bands: readonly number[]): Map<number, number> {
+	if (learners.length === 0) {
+		const validated = new Map<number, number>();
+		for (const c of clozeItemsRepo(db).counts()) if (c.validated) validated.set(c.levelBand, (validated.get(c.levelBand) ?? 0) + c.n);
+		return validated;
+	}
+	const perLearner = learners.map((id) => learnerClozeRepo(db, id).availableByBand());
+	return new Map(bands.map((band) => [band, Math.min(...perLearner.map((m) => m.get(band) ?? 0))]));
+}
+
+/** Current stock levels from the database, across every non-archived profile (one shared stock). */
 export function readStockLevels(db: DbOrTx): StockLevels {
 	const cache = cacheRepo(db);
 	const topicByHash = new Map(DRILL_CODES.map((t) => [drillParamsHash(t), t]));
@@ -85,9 +101,13 @@ export function readStockLevels(db: DbOrTx): StockLevels {
 	}
 	const reading = new Map<number, number>();
 	for (const row of cache.countByParams('reading')) reading.set(row.levelBand, (reading.get(row.levelBand) ?? 0) + row.n);
+	const learners = profilesRepo(db)
+		.active()
+		.map((p) => p.id);
+	const ceiling = Math.max(1, ...learners.map((id) => profileRepo(db, id).get().knownBandCeiling));
 	return {
-		ceiling: profileRepo(db).get().knownBandCeiling,
-		cloze: clozeItemsRepo(db).availableByBand(),
+		ceiling,
+		cloze: sharedClozeAvailable(db, learners, bandsInRange(ceiling)),
 		drills,
 		reading
 	};

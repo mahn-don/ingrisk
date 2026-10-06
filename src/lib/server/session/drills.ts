@@ -20,17 +20,17 @@ const DAY = 86_400_000;
  * Errors per topic code over the last 30 days: codes of graded writing errors, lapses (Again) on
  * grammar cloze cards, and missed drills.
  */
-export function weaknessProfile(db: DbOrTx, now: Date): Map<TopicCode, number> {
+export function weaknessProfile(db: DbOrTx, profileId: number, now: Date): Map<TopicCode, number> {
 	const since = new Date(now.getTime() - WEAKNESS_WINDOW_DAYS * DAY);
 	const profile = new Map<TopicCode, number>();
 	const add = (code: TopicCode, n = 1) => profile.set(code, (profile.get(code) ?? 0) + n);
-	for (const submission of writingRepo(db).scoredSince(since)) for (const e of submission.errorsJson ?? []) add(e.topic_code);
+	for (const submission of writingRepo(db, profileId).scoredSince(since)) for (const e of submission.errorsJson ?? []) add(e.topic_code);
 	const topics = new Map(grammarTopicsRepo(db).all().map((t) => [t.id, t.code as TopicCode]));
-	for (const [topicId, n] of reviewLogsRepo(db).againByGrammarTopicSince(since)) {
+	for (const [topicId, n] of reviewLogsRepo(db, profileId).againByGrammarTopicSince(since)) {
 		const code = topics.get(topicId);
 		if (code !== undefined) add(code, n);
 	}
-	for (const missed of drillResultsRepo(db).missedSince(since)) add(missed.topicCode);
+	for (const missed of drillResultsRepo(db, profileId).missedSince(since)) add(missed.topicCode);
 	return profile;
 }
 
@@ -73,10 +73,10 @@ function takeForCodes(db: DbOrTx, now: Date, band: number, codes: readonly strin
 }
 
 /** Take the session's drills (marked served) for these codes, nearest to `band`. */
-export function takeDrills(db: DbOrTx, now: Date, band: number, seed: string): DrillItem[] {
+export function takeDrills(db: DbOrTx, profileId: number, now: Date, band: number, seed: string): DrillItem[] {
 	const cache = cacheRepo(db);
 	const inStock = DRILL_CODES.filter((code) => cache.hasUnservedNear('error', band, 8, drillParamsHash(code)));
-	return takeForCodes(db, now, band, chooseDrillCodes(weaknessProfile(db, now), inStock, DRILLS_PER_SESSION, seed));
+	return takeForCodes(db, now, band, chooseDrillCodes(weaknessProfile(db, profileId, now), inStock, DRILLS_PER_SESSION, seed));
 }
 
 /** A topic focus session: up to 2 cached drills of that code (none when it has no drill stock). */
