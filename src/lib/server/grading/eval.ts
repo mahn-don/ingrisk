@@ -4,12 +4,19 @@ import { z } from 'zod';
 import { TOPIC_CODES } from '../db/schema.ts';
 import type { LlmDeps } from '../llm/client.ts';
 import { LlmError } from '../llm/errors.ts';
-import type { BaseFeedback } from '../llm/prompts/feedback.ts';
+import { type BaseFeedback, selectShownErrors } from '../llm/prompts/feedback.ts';
 import { gradeTranslation, gradeWriting } from './grading.ts';
 
 export const GRADING_FIXTURES_PATH = 'test/eval/grading-fixtures.json';
 
-const Base = { id: z.string(), level_band: z.number().int().min(1).max(8), expected_codes: z.array(z.enum(TOPIC_CODES)), note: z.string() };
+const Base = {
+	id: z.string(),
+	level_band: z.number().int().min(1).max(8),
+	expected_codes: z.array(z.enum(TOPIC_CODES)),
+	/** Codes the 3 errors shown to the learner must include (distinct codes first; Phase 11). */
+	expected_shown_codes: z.array(z.enum(TOPIC_CODES)).optional(),
+	note: z.string()
+};
 export const GradingFixture = z.discriminatedUnion('type', [
 	z.object({ ...Base, type: z.literal('translation'), vi: z.string(), reference_en: z.string(), user_en: z.string() }),
 	z.object({ ...Base, type: z.literal('writing'), prompt_vi: z.string(), user_text: z.string(), expected_on_topic: z.boolean().optional() })
@@ -22,6 +29,8 @@ export function readGradingFixtures(path = GRADING_FIXTURES_PATH): GradingFixtur
 
 export interface GradingRun {
 	codes: string[];
+	/** The codes of the 3 errors the learner would see (selectShownErrors). */
+	shownCodes: string[];
 	errors: BaseFeedback['errors'];
 	/** Writing only: the task-relevance verdict. */
 	onTopic: boolean | null;
@@ -37,6 +46,8 @@ export interface FixtureResult {
 	runs: (GradingRun | { failed: string })[];
 	/** Per run: every expected code was reported. */
 	expectedFound: boolean[];
+	/** Per run: every expected_shown_codes code is among the 3 shown (null without that field). */
+	shownFound: (boolean | null)[];
 	/** Per run: invented errors (any error on a correct answer, plus errors the guard dropped). */
 	invented: number[];
 	/** Per run: reported codes that were not expected. */
@@ -57,6 +68,7 @@ export async function gradeFixture(fixture: GradingFixture, runs: number, llm: L
 			const feedback = graded.feedback;
 			results.push({
 				codes: feedback.errors.map((e) => e.topic_code),
+				shownCodes: selectShownErrors(feedback.errors).map((s) => s.error.topic_code),
 				errors: feedback.errors,
 				cefr: feedback.cefr_estimate,
 				meaningOk: 'meaning_ok' in feedback ? (feedback.meaning_ok as boolean) : null,
@@ -74,6 +86,7 @@ export async function gradeFixture(fixture: GradingFixture, runs: number, llm: L
 		fixture,
 		runs: results,
 		expectedFound: results.map((r) => isRun(r) && fixture.expected_codes.every((c) => r.codes.includes(c))),
+		shownFound: results.map((r) => (fixture.expected_shown_codes === undefined ? null : isRun(r) && fixture.expected_shown_codes.every((c) => r.shownCodes.includes(c)))),
 		invented: results.map((r) => (isRun(r) ? (correctAnswer ? r.codes.length : 0) + r.dropped : 0)),
 		extraCodes: results.map((r) => (isRun(r) ? r.codes.filter((c) => !fixture.expected_codes.includes(c as never)) : [])),
 		cefrAgree: ok.length < 2 ? null : ok.every((r) => r.cefr === ok[0].cefr)
@@ -88,6 +101,7 @@ export function gradingSummary(results: readonly FixtureResult[]): string[] {
 	const failedRuns = results.reduce((n, r) => n + r.runs.filter((x) => !isRun(x)).length, 0);
 	return [
 		`expected codes found in every run: ${withErrors.filter((r) => r.expectedFound.every(Boolean)).length}/${withErrors.length} fixtures`,
+		`expected shown codes (3 shown, distinct first) in every run: ${results.filter((r) => r.shownFound.every((b) => b === true) && r.shownFound.length > 0 && r.fixture.expected_shown_codes !== undefined).length}/${results.filter((r) => r.fixture.expected_shown_codes !== undefined).length} fixtures`,
 		`invented errors: ${results.reduce((n, r) => n + r.invented.reduce((a, b) => a + b, 0), 0)} (on correct answers and guard-dropped)`,
 		`correct translations with zero errors and meaning_ok in every run: ${
 			correct.filter((r) => r.runs.every((x) => isRun(x) && x.codes.length === 0 && x.meaningOk === true)).length

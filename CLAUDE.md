@@ -149,6 +149,8 @@ deploy/install.sh`; then `deploy/deploy.sh` (no password; rollback: `git checkou
   `NODE_ENV=production`). Every generator runs on a budget (`generation/budget.ts`): `--max-calls`
   and `LLM_DAILY_CALL_CAP`. Every generated item passes rules and a blind critic.
 - Every CLI parses arguments with `tool/lib/cli.ts` (`parseArgs` strict, `--help` with an example).
+- LLM-backed routes are limited to 60 requests/hour (`llm/route-limit.ts`; wrap new ones with `llmLimited`).
+  Graders return every error (all mined); the UI shows 3, distinct codes first (`selectShownErrors`).
 
 ## Environment
 

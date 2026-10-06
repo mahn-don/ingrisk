@@ -111,7 +111,7 @@ export async function submitAnchor(deps: AnchorDeps, input: { sessionId: number;
 	if (anchor === null || anchor.type === 'reading') throw new SessionError(400, 'invalid', 'this session has no writing task');
 	const existing = writing.forSession(session.id);
 	if (existing !== undefined) {
-		return existing.status === 'scored' ? { queued: false, feedback: feedbackCard(db, existing) } : { queued: true };
+		return existing.status === 'scored' ? { queued: false, feedback: feedbackCard(db, existing) } : { queued: true, reason: 'pending' };
 	}
 	const text = input.text.trim();
 	if (!/[A-Za-z]/.test(text) || text.length > MAX_ANCHOR_CHARS) throw new SessionError(400, 'invalid', 'empty or too long');
@@ -133,14 +133,14 @@ export async function submitAnchor(deps: AnchorDeps, input: { sessionId: number;
 			referenceEn: sentence?.enText ?? null
 		});
 	}
-	if (deps.grade === null) return { queued: true };
+	if (deps.grade === null) return { queued: true, reason: 'no_provider' };
 
 	const queued = submission;
 	const graded = deps.grade(queued, band).then(
 		(grade) => applyWritingGrade(db, queued.id, grade, deps.now()),
 		(error: unknown) => {
 			deps.logError?.('session writing not graded; it stays queued', error);
-			return false;
+			return 'error' as const;
 		}
 	);
 	let timer: ReturnType<typeof setTimeout> | undefined;
@@ -149,7 +149,7 @@ export async function submitAnchor(deps: AnchorDeps, input: { sessionId: number;
 	});
 	const outcome = await Promise.race([graded, timeout]);
 	clearTimeout(timer);
-	if (outcome !== true) return { queued: true };
+	if (outcome !== true) return { queued: true, reason: outcome === 'timeout' ? 'timeout' : 'llm_error' };
 	// Shown now, inline: it must not come back at the next session start.
 	const scored = writing.markSeen(queued.id, deps.now());
 	return { queued: false, feedback: feedbackCard(db, scored) };

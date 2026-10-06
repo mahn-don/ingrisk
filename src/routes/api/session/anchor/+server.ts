@@ -1,7 +1,9 @@
 import type { RequestHandler } from './$types';
+import { llmLimited } from '#lib/server/llm/route-limit.js';
 import { appAnchorDeps } from '#lib/server/session/app.js';
 import { submitAnchor } from '#lib/server/session/engine.js';
 import { AnchorBody, readBody, sessionResponse } from '#lib/server/session/http.js';
 
 // The Viết task: stored, then graded for up to 30 s (feedback), else { queued: true }.
-export const POST: RequestHandler = ({ request }) => sessionResponse(async () => submitAnchor(appAnchorDeps(), await readBody(request, AnchorBody)));
+// LLM-backed: at most 60 requests per hour (src/lib/server/llm/route-limit.ts).
+export const POST: RequestHandler = ({ request }) => llmLimited(() => sessionResponse(async () => submitAnchor(appAnchorDeps(), await readBody(request, AnchorBody))));

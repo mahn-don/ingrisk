@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { WritingFeedback } from '../llm/prompts/feedback.ts';
+import { MAX_RETURNED_ERRORS, WritingFeedback, selectShownErrors } from '../llm/prompts/feedback.ts';
 import * as translationPrompt from '../llm/prompts/grade-translation.ts';
 import { toProviderSchema } from '../llm/schema.ts';
 import { openaiContent, openaiProvider, scriptedFetch, setupProviders, testDeps } from '../llm/test-helpers.ts';
+import { readGradingFixtures } from './eval.ts';
 import { gradeTranslation, gradeWriting, guardErrors, toDisplay } from './grading.ts';
 
 const error = (original: string, correction: string, topic_code = 'SVA') => ({ original, correction, topic_code, explanation_vi: 'Sau "she" động từ thêm -s.' });
@@ -21,9 +22,11 @@ describe('WritingFeedback schema', () => {
 		expect(WritingFeedback.parse(feedback()).errors[0].topic_code).toBe('SVA');
 	});
 
-	it('keeps the 3 most important errors of a longer list', () => {
+	it('keeps every returned error (up to 10) so all of them can be mined', () => {
 		const four = [error('a', 'b'), error('c', 'd'), error('e', 'f'), error('g', 'h')];
-		expect(WritingFeedback.parse(feedback(four)).errors.map((e) => e.original)).toEqual(['a', 'c', 'e']);
+		expect(WritingFeedback.parse(feedback(four)).errors.map((e) => e.original)).toEqual(['a', 'c', 'e', 'g']);
+		const twelve = Array.from({ length: 12 }, (_, i) => error(`w${i}`, `x${i}`));
+		expect(WritingFeedback.parse(feedback(twelve)).errors).toHaveLength(MAX_RETURNED_ERRORS);
 	});
 
 	it('rejects unknown codes, scores out of range and extra fields', () => {
@@ -68,7 +71,7 @@ describe('grading services', () => {
 		const result = await gradeWriting({ prompt_vi: 'Viết về công việc.', user_text: 'She go to work.', level_band: 2, feedback_mode: 'indirect' }, testDeps(db, fetch).deps);
 		expect(result.feedback.corrected_text).toBe('She goes to work.');
 		expect(result.display).not.toHaveProperty('corrected_text');
-		expect(result.promptVersion).toBe('grade-writing@2');
+		expect(result.promptVersion).toBe('grade-writing@3');
 		expect(JSON.parse((requests[0].body.messages as { content: string }[])[1].content.split('\n')[1]).learner_text).toBe('She go to work.');
 	});
 
@@ -94,5 +97,34 @@ describe('grading services', () => {
 	it('the translation prompt says the reference is one valid translation of many', () => {
 		expect(translationPrompt.system).toContain('only ONE valid translation');
 		expect(translationPrompt.system).toMatch(/NO errors and meaning_ok is true/);
+	});
+});
+
+describe('selectShownErrors', () => {
+	it('SVA, SVA, ART, COP: shows 3 distinct codes, COP included, with the SVA repeat counted', () => {
+		const errors = [error('he go', 'he goes', 'SVA'), error('she like', 'she likes', 'SVA'), error('go to market', 'go to the market', 'ART'), error('she very tired', 'she is very tired', 'COP')];
+		const shown = selectShownErrors(errors);
+		expect(shown.map((s) => s.error.topic_code)).toEqual(['SVA', 'ART', 'COP']);
+		expect(shown.map((s) => s.repeats)).toEqual([2, 1, 1]);
+		expect(shown[0].error.original).toBe('he go'); // the most important of its code
+	});
+
+	it('fills with repeats when there are fewer than 3 codes, keeping the model order', () => {
+		const errors = [error('a', 'b', 'TNS'), error('c', 'd', 'TNS'), error('e', 'f', 'TNS'), error('g', 'h', 'ART')];
+		expect(selectShownErrors(errors).map((s) => [s.error.original, s.repeats])).toEqual([
+			['a', 3],
+			['g', 1],
+			['c', 3]
+		]);
+		expect(selectShownErrors([])).toEqual([]);
+	});
+});
+
+describe('grading eval fixtures', () => {
+	it('parse, and include the repeated-code cases with expected shown codes', () => {
+		const fixtures = readGradingFixtures();
+		const repeated = fixtures.find((f) => f.id === 'sva-sva-art-cop');
+		expect(repeated?.expected_shown_codes).toEqual(['SVA', 'ART', 'COP']);
+		expect(fixtures.filter((f) => f.expected_shown_codes !== undefined)).toHaveLength(2);
 	});
 });

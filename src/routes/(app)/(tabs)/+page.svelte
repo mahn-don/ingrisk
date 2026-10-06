@@ -88,6 +88,13 @@
 	{/each}
 </ul>
 
+{#if !data.shape.writeAvailable}
+	<p class="mt-4 rounded-xl bg-warning-soft px-3 py-2 text-sm text-text" data-testid="no-provider">
+		{t.home.noProvider}
+		<a class="font-semibold text-primary underline" href="/settings/providers">{t.home.noProviderLink}</a>
+	</p>
+{/if}
+
 <section class="mt-4 rounded-2xl border border-border bg-surface p-4" aria-labelledby="today-title" data-testid="today-card">
 	<h2 id="today-title" class="sr-only">{t.home.todayTitle}</h2>
 	<div class="flex items-start justify-between gap-3">

@@ -136,12 +136,48 @@ export function lexicalCandidate(ctx: Context): Candidate | null {
 	});
 }
 
+// Article gaps only where the rules leave one answer (Phase 11): "a" vs "the" before an ordinary
+// noun is usually both grammatical, and the critic rightly rejected most such items.
+const SUPERLATIVE_HEADS = new Set(['most', 'least', 'best', 'worst']);
+const UNIQUE_THE = new Set(['first', 'last', 'same', 'only', 'next', 'sun', 'moon', 'earth', 'world', 'sky', 'internet', 'universe']);
+const QUANTITY_A = new Set(['lot', 'bit', 'couple']);
+const PER_UNIT = new Set(['day', 'week', 'month', 'year', 'hour', 'minute']);
+const PER_BEFORE = new Set(['once', 'twice', 'times']);
+const EXCLAMATIVE_A = new Set(['such', 'what', 'quite', 'half']);
+
+export type ArticleRule = 'superlative' | 'unique' | 'existential' | 'exclamative' | 'quantity' | 'per_unit';
+
+/**
+ * Why the article at token i has exactly one right answer, or null (no gap).
+ * - the: before a superlative (most, best, an -est form of an adjective), an ordinal or unique
+ *   reference (first, last, same, only, next; sun, moon, world, internet …);
+ * - a/an: a first mention after "there is/was", after such/what/quite/half, "a lot/bit/couple of",
+ *   and "once/twice/three times a week". Generic plurals and mass nouns never get a gap.
+ */
+export function articleRule(ctx: Pick<Context, 'tokens' | 'deps'>, i: number): ArticleRule | null {
+	const word = ctx.tokens[i].text.toLowerCase();
+	const words = ctx.tokens.map((t) => (t.kind === 'word' ? t.text.toLowerCase() : ''));
+	const next = words[i + 1] ?? '';
+	const prev = words[i - 1] ?? '';
+	if (word === 'the') {
+		const lemma = ctx.deps.forms.lemmaOf.get(next)?.headword;
+		if (SUPERLATIVE_HEADS.has(next) || (next.endsWith('est') && lemma !== undefined && lemma !== next)) return 'superlative';
+		return UNIQUE_THE.has(next) ? 'unique' : null;
+	}
+	if (prev === "there's" || ((prev === 'is' || prev === 'was') && words[i - 2] === 'there')) return 'existential';
+	if (EXCLAMATIVE_A.has(prev)) return 'exclamative';
+	if (QUANTITY_A.has(next)) return 'quantity';
+	if (PER_BEFORE.has(prev) && PER_UNIT.has(next)) return 'per_unit';
+	return null;
+}
+
 function articleCandidates(ctx: Context): Candidate[] {
 	return ctx.tokens.flatMap((_, i) => {
 		const word = gapWord(ctx, i);
 		if (word === null || !(ARTICLES as readonly string[]).includes(word)) return [];
 		const next = ctx.tokens[i + 1];
 		if (next === undefined || next.kind !== 'word') return [];
+		if (articleRule(ctx, i) === null) return [];
 		return [make(ctx, 'article', i, { topicCode: 'ART', options: caseLike(i === ctx.first, [...ARTICLES, NO_WORD]) })];
 	});
 }

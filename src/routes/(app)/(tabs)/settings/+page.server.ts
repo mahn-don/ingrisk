@@ -10,6 +10,7 @@ import { providersRepo } from '#lib/server/db/repositories/providers.js';
 import { settingsRepo } from '#lib/server/db/repositories/settings.js';
 import { llmConfigured } from '#lib/server/generation/app-llm.js';
 import { dailyCapFromEnv } from '#lib/server/generation/budget.js';
+import { llmRouteLimiter, rateLimitMessage } from '#lib/server/llm/route-limit.js';
 import { stockOverview } from '#lib/server/settings/content.js';
 import { parseLearningForm, saveLearningSettings } from '#lib/server/settings/learning.js';
 import { usageLastDays } from '#lib/server/settings/usage.js';
@@ -56,6 +57,8 @@ export const actions: Actions = {
 	generate: () => {
 		const db = getDb();
 		if (!llmConfigured(db)) return fail(409, { generate: 'no_provider' as const });
+		const take = llmRouteLimiter().take(Date.now());
+		if (!take.ok) return fail(429, { generate: 'rate_limited' as const, message: rateLimitMessage(take.retryAfterMs) });
 		let dailyCap: number;
 		try {
 			dailyCap = dailyCapFromEnv(process.env);

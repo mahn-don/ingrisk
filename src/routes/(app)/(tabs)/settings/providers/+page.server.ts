@@ -1,7 +1,10 @@
 import { fail, redirect } from '@sveltejs/kit';
 import { getDb } from '#lib/server/db/client.js';
 import { providerTestDeps } from '#lib/server/generation/app-llm.js';
+import { providersRepo } from '#lib/server/db/repositories/providers.js';
+import { llmRouteLimiter, rateLimitMessage } from '#lib/server/llm/route-limit.js';
 import { smokeTest } from '#lib/server/llm/smoke.js';
+import { t } from '#lib/messages/vi.js';
 import {
 	deleteProvider,
 	parseProviderForm,
@@ -24,6 +27,12 @@ export const load: PageServerLoad = ({ url }) => {
 	};
 };
 
+/**
+ * The provider was deleted elsewhere (another tab, the CLI) while this page was open: a 404 with a
+ * Vietnamese message; the page shows it as a toast and reloads the list.
+ */
+const gone = () => fail(404, { toast: t.settings.providersPage.gone, stale: true });
+
 const idOf = (form: FormData) => {
 	const id = Number(form.get('id'));
 	return Number.isInteger(id) && id > 0 ? id : null;
@@ -42,26 +51,28 @@ export const actions: Actions = {
 	},
 	delete: async ({ request }) => {
 		const id = idOf(await request.formData());
-		if (id === null || !deleteProvider(getDb(), id)) return fail(404, { done: null });
+		if (id === null || !deleteProvider(getDb(), id)) return gone();
 		return { done: 'deleted' as const };
 	},
 	active: async ({ request }) => {
 		const id = idOf(await request.formData());
-		if (id === null || !setActiveProvider(getDb(), id)) return fail(404, { done: null });
+		if (id === null || !setActiveProvider(getDb(), id)) return gone();
 		return { done: 'active' as const };
 	},
 	fallback: async ({ request }) => {
 		const form = await request.formData();
-		const id = form.get('id') === '' ? null : idOf(form);
-		if (id === null && form.get('id') !== '') return fail(404, { done: null });
-		if (!setFallbackProvider(getDb(), id)) return fail(404, { done: null });
+		const clear = form.get('id') === '';
+		const id = clear ? null : idOf(form);
+		if ((!clear && id === null) || !setFallbackProvider(getDb(), id)) return gone();
 		return { done: 'fallback' as const };
 	},
 	/** "Kiểm tra kết nối": the smoke call, without fallback; OK or the redacted error, with latency. */
 	test: async ({ request }) => {
 		const id = idOf(await request.formData());
-		if (id === null) return fail(404, { done: null });
 		const db = getDb();
+		if (id === null || providersRepo(db).byId(id) === undefined) return gone();
+		const take = llmRouteLimiter().take(Date.now());
+		if (!take.ok) return fail(429, { toast: rateLimitMessage(take.retryAfterMs), stale: false });
 		const result = await smokeTest(id, providerTestDeps(db));
 		return {
 			test: result.ok

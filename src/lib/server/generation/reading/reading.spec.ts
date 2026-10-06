@@ -9,7 +9,10 @@ import { buildFormIndex } from '../forms.ts';
 import { importLexemes } from '../import.ts';
 import { NGSL, cannedWorld } from '../test-fixtures.ts';
 import { type ReadingPayload, buildReading, pickTopics } from './build.ts';
-import { coverage, wordCount } from './coverage.ts';
+import { allowedWords, coverage, wordCount } from './coverage.ts';
+import { EVERYDAY_WORDS, isEveryday } from './everyday.ts';
+import { openaiContent, scriptedFetch, testDeps } from '../../llm/test-helpers.ts';
+import { fixtureDb } from '../test-fixtures.ts';
 import { judgeReading } from './critic.ts';
 import { checkPassage, inPassage, wordRange } from './rules.ts';
 import { TOPICS } from './topics.ts';
@@ -30,6 +33,32 @@ describe('coverage', () => {
 		// At band 2, band + 1 = 3 covers "rose".
 		expect(coverage(text, 2, forms).uncovered).toEqual(['purple']);
 		expect(wordCount('I have 2 dogs, and a cat.')).toBe(7); // the number counts, the comma does not
+	});
+});
+
+describe('everyday words (Phase 11)', () => {
+	it('count as known up to band 4, plurals and verb forms included', () => {
+		// Not in the fixture NGSL: without the allowlist all six would be above the level.
+		const text = 'Tom has cake and soup in bowls. I borrowed a gift online.';
+		const band2 = coverage(text, 2, forms);
+		expect(band2.uncovered).toEqual([]);
+		expect(band2.ratio).toBe(1);
+		const band5 = coverage(text, 5, forms);
+		expect(band5.uncovered).toEqual(['cake', 'soup', 'bowls', 'borrowed', 'gift', 'online']);
+		expect(band5.covered).toBe(band5.total - 6);
+		expect([isEveryday('bowls'), isEveryday('borrowed'), isEveryday('cooking'), isEveryday('zebra')]).toEqual([true, true, true, false]);
+		expect(EVERYDAY_WORDS.size).toBeGreaterThanOrEqual(150);
+	});
+
+	it('the prompt word list: band lemmas without function words, plus everyday words up to band 4', () => {
+		const band1 = allowedWords(1, forms);
+		expect(band1).toContain('dog');
+		expect(band1).not.toContain('the');
+		expect(band1).toContain('soup');
+		expect(allowedWords(5, forms)).not.toContain('soup');
+		// The NGSL part is capped (most frequent first); the everyday words follow.
+		expect(allowedWords(1, forms, 1).length).toBeLessThan(band1.length);
+		expect(allowedWords(1, forms, 1)[0]).toBe(band1[0]);
 	});
 });
 
@@ -109,8 +138,39 @@ describe('buildReading', () => {
 		expect(Object.keys(critic[0].questions[0]).sort()).toEqual(['options', 'q', 'question']); // no answer
 		const [item] = cacheRepo(fx.db).byKind('reading', true);
 		const payload = item.payloadJson as ReadingPayload;
-		expect(item.promptVersion).toBe('reading-passage@1+reading-critic@1');
+		expect(item.promptVersion).toBe('reading-passage@2+reading-critic@1');
 		expect(payload.coverage).toBe(1);
 		for (const q of payload.questions) expect(payload.passage_en).toContain(q.options[q.answer_index]);
+	});
+});
+
+describe('the coverage retry', () => {
+	const lowCoverage = (): Passage => passage({ passage_en: Array.from({ length: 15 }, () => 'The zebra is purple.').join(' '), glossary: [] });
+	const run = async (second: Passage) => {
+		const fx = fixtureDb();
+		const { fetch, requests } = scriptedFetch([
+			openaiContent(JSON.stringify(lowCoverage())),
+			openaiContent(JSON.stringify(second)),
+			{ status: 400, body: { error: { message: 'critic not scripted' } } }
+		]);
+		const { deps: llm } = testDeps(fx.db, fetch);
+		const summary = await buildReading([{ band: 1, count: 1 }], { llm, forms: fx.forms, blocklist: fx.blocklist }, { budget: unlimitedBudget });
+		return { summary, requests };
+	};
+
+	it('sends the words above the level back once and judges the rewrite', async () => {
+		const { summary, requests } = await run(passage());
+		const user = (requests[1].body.messages as { role: string; content: string }[]).find((m) => m.role === 'user')!.content;
+		expect(user).toContain('zebra, purple');
+		expect(user).toContain('Rewrite it');
+		expect(JSON.parse(user.slice(user.indexOf('{')).split('\n\n')[0]).allowed_words).toContain('dog');
+		expect(summary.rejected).toEqual({ 'reading:coverage_retry': 1 });
+		expect(requests).toHaveLength(3); // the rewrite passed the rules and went to the critic
+	});
+
+	it('rejects after one failed rewrite', async () => {
+		const { summary, requests } = await run(lowCoverage());
+		expect(requests).toHaveLength(2);
+		expect(Object.keys(summary.rejected).sort()).toEqual(['reading:coverage_retry', 'rule:coverage']);
 	});
 });

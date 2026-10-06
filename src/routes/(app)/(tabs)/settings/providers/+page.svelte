@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
+	import Toast from '#lib/components/Toast.svelte';
 	import Button from '#lib/components/Button.svelte';
 	import Card from '#lib/components/Card.svelte';
 	import Icon from '#lib/components/Icon.svelte';
@@ -18,7 +20,15 @@
 	const done = $derived(form && 'done' in form ? form.done : null);
 	const fieldClass = (field: string) =>
 		`mt-1 min-h-12 w-full rounded-xl border-2 bg-surface px-3 text-base ${invalid(field) ? 'border-incorrect' : 'border-control'}`;
-	const keep = () => async ({ update }: { update: (o?: { reset?: boolean }) => Promise<void> }) => update({ reset: false });
+	const toast = $derived(form && 'toast' in form ? (form.toast ?? null) : null);
+	type Result = { type: string; data?: Record<string, unknown> };
+	/** After an action: keep the inputs; a stale provider id reloads the list (the toast says why). */
+	const keep =
+		() =>
+		async ({ update, result }: { update: (o?: { reset?: boolean }) => Promise<void>; result: Result }) => {
+			await update({ reset: false });
+			if (result.type === 'failure' && result.data?.stale === true) await invalidateAll();
+		};
 </script>
 
 <svelte:head>
@@ -140,8 +150,8 @@
 							class="col-span-2"
 							use:enhance={() => {
 								testing = provider.id;
-								return async ({ update }) => {
-									await update({ reset: false });
+								return async (event) => {
+									await keep()(event);
 									testing = null;
 								};
 							}}
@@ -178,3 +188,5 @@
 		{/each}
 	</ul>
 {/if}
+
+<Toast message={toast} />

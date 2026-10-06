@@ -104,11 +104,21 @@ describe('lexical candidates', () => {
 });
 
 describe('grammar candidates', () => {
-	it('detects articles with a, an, the and no word', () => {
-		const [c] = grammar('I saw a dog there.', 'article');
+	it('makes article gaps only where one answer is right by rule', () => {
+		const [c] = grammar('There is a dog in the garden.', 'article');
 		expect(c).toMatchObject({ answer: 'a', topicCode: 'ART', options: ['a', 'an', 'the', NO_WORD], initial: false });
-		const [initial] = grammar('The dog sleeps well.', 'article');
+		const [initial] = grammar('The sun is very hot today.', 'article');
 		expect(initial).toMatchObject({ answer: 'The', initial: true, options: ['A', 'An', 'The', NO_WORD] });
+		const answers = (text: string) => grammar(text, 'article').map((x) => x.answer);
+		expect(answers('She is the best student in the class.')).toEqual(['the']); // superlative; "the class" is skipped
+		expect(answers('It was the first time I saw it.')).toEqual(['the']);
+		expect(answers('What a beautiful day it is.')).toEqual(['a']);
+		expect(answers('I have a lot of friends.')).toEqual(['a']);
+		expect(answers('We swim twice a week.')).toEqual(['a']);
+		// Both "a" and "the" fit: no gap. Generic plurals and mass nouns have no article to gap.
+		expect(answers('I saw a dog there.')).toEqual([]);
+		expect(answers('The dog sleeps well.')).toEqual([]);
+		expect(answers('My dogs like cold water.')).toEqual([]);
 	});
 
 	it('detects prepositions with distractors from the confusion table', () => {

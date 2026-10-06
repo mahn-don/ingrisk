@@ -140,7 +140,7 @@ export function cannedFetch(opts: CannedOptions): typeof globalThis.fetch {
 		const band = Number(brief.level_band);
 		const [min, max] = brief.word_range as [number, number];
 		const usable = seededShuffle(
-			opts.corpus.filter((s) => !s.includes('"') && coverage(s, band, opts.forms).ratio === 1),
+			opts.corpus.filter((s) => !s.includes('"') && !tokenize(s).some((t) => t.kind === 'word' && opts.blocklist.isBlocked(t.text.toLowerCase())) && coverage(s, band, opts.forms).ratio === 1),
 			`passage|${band}|${String(brief.topic)}|${generated.get('reading') ?? 0}`
 		);
 		generated.set('reading', (generated.get('reading') ?? 0) + 1);
@@ -195,7 +195,9 @@ export function cannedFetch(opts: CannedOptions): typeof globalThis.fetch {
 		const purpose = body.response_format?.json_schema?.name ?? '';
 		// The first user message holds the payload (a repair round appends more messages after it).
 		const user = body.messages.find((m) => m.role === 'user')?.content ?? '';
-		const payload = JSON.parse(user.slice(user.indexOf('{'))) as { items: Item[] } & Item;
+		// The payload JSON follows the instruction line; a reading rewrite adds text after it.
+		const json = user.slice(user.indexOf('{'));
+		const payload = JSON.parse(json.split('\n\n')[0]) as { items: Item[] } & Item;
 		if (opts.onRequest?.(payload, purpose) === 'invalid') return reply({ items: 'not an array' });
 		const learnerText = String(payload.learner_text ?? payload.learner_translation ?? '');
 		if (learnerText.includes(GRADE_LATER_MARKER)) {
@@ -214,13 +216,13 @@ export function cannedFetch(opts: CannedOptions): typeof globalThis.fetch {
 				});
 			case 'cloze_critic':
 				return reply({
-					items: payload.items.map((item) => ({
-						n: item.n,
-						sentences: (item.sentences as { label: string; text: string }[]).map((s) => {
+					items: payload.items.map((item) => {
+						const sentences = (item.sentences as { label: string; text: string }[]).map((s) => {
 							const ok = known.has(s.text);
 							return { label: s.label, grammatical: ok, natural: ok, meaning_ok: ok, note: ok ? 'original sentence' : 'not the original' };
-						})
-					}))
+						});
+						return { n: item.n, sentences, another_could_be_correct: sentences.filter((s) => s.grammatical).length > 1 };
+					})
 				});
 			case 'drill_explain':
 				return reply({

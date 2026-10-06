@@ -5,7 +5,19 @@ import { readFileSync } from 'node:fs';
 import { type Page, expect, test } from '@playwright/test';
 import Database from 'better-sqlite3';
 import type { StartResponse } from '../lib/session/types.ts';
-import { E2E_FAKE_PROVIDER_KEY, SERVERS, addDueCards, answerOf, login, seedHistory, servedCards, setNewCardsPerDay, topicsOf } from '../../test/e2e/support.ts';
+import {
+	E2E_FAKE_PROVIDER_KEY,
+	SERVERS,
+	addDueCards,
+	answerOf,
+	deleteProviderRow,
+	insertProvider,
+	login,
+	seedHistory,
+	servedCards,
+	setNewCardsPerDay,
+	topicsOf
+} from '../../test/e2e/support.ts';
 
 test.describe.configure({ mode: 'serial', timeout: 120_000 });
 
@@ -140,6 +152,27 @@ test('add a provider and test the connection (canned); the key is never shown', 
 
 	await provider.getByRole('button', { name: 'Đặt làm dự phòng' }).click();
 	await expect(provider.getByText('Dự phòng', { exact: true })).toBeVisible();
+});
+
+test('a provider deleted behind the UI: "set active" shows an error toast and the list reloads', async ({ page }) => {
+	const id = insertProvider(DB, 'Stale provider');
+	await login(page, '/settings/providers');
+	await page.waitForLoadState('networkidle');
+	const stale = page.locator('[data-testid="provider"][data-name="Stale provider"]');
+	await expect(stale).toBeVisible();
+	deleteProviderRow(DB, id);
+	await stale.getByRole('button', { name: 'Dùng nhà cung cấp này' }).click();
+	await expect(page.getByTestId('toast')).toContainText('Nhà cung cấp này không còn nữa');
+	await expect(stale).toHaveCount(0);
+	// The other actions on a stale card behave the same.
+	const again = insertProvider(DB, 'Stale again');
+	await page.reload();
+	await page.waitForLoadState('networkidle');
+	const card = page.locator('[data-testid="provider"][data-name="Stale again"]');
+	deleteProviderRow(DB, again);
+	await card.getByRole('button', { name: 'Kiểm tra kết nối' }).click();
+	await expect(page.getByTestId('toast')).toContainText('Nhà cung cấp này không còn nữa');
+	await expect(card).toHaveCount(0);
 });
 
 test('the backup downloads a SQLite file with the cards; it needs a login', async ({ page, browser }) => {

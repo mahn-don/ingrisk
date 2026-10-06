@@ -3,12 +3,12 @@
 import { z } from 'zod';
 import { describeBand } from './levels.ts';
 
-export const PROMPT_VERSION = 'reading-passage@1';
+export const PROMPT_VERSION = 'reading-passage@2';
 export const PURPOSE = 'reading_passage';
 
 export const system = `You write graded reading passages for a Vietnamese adult learning English.
 
-Write one short, natural, interesting text about the topic in the brief: a little story, a message, a blog post or a description of everyday life. Keep strictly to the level: short sentences, common words; at most a few words above the level, and put those in the glossary. Use only the names and places listed in the brief. Nothing violent, sexual or political.
+Write one short, natural, interesting text about the topic in the brief: a little story, a message, a blog post or a description of everyday life. Keep strictly to the level: short sentences, common words. allowed_words lists the content words of the level (any form of them is fine: plurals, past tenses); use them, small function words (a, the, in, and, he…) and the listed names only. At most 2 or 3 other words in the whole text, and put those in the glossary. At least 95% of the words must be allowed. Use only the names and places listed in the brief. Nothing violent, sexual or political.
 
 Return:
 - title_en: a short title;
@@ -22,6 +22,8 @@ export interface PassageBrief {
 	min_words: number;
 	max_words: number;
 	names: readonly string[];
+	/** The band's content words (lemmas), most frequent first. */
+	allowed_words: readonly string[];
 }
 
 export function buildUser(brief: PassageBrief): string {
@@ -30,9 +32,22 @@ export function buildUser(brief: PassageBrief): string {
 		level_band: brief.level_band,
 		topic: brief.topic,
 		word_range: [brief.min_words, brief.max_words],
-		names_and_places: brief.names
+		names_and_places: brief.names,
+		allowed_words: brief.allowed_words.join(' ')
 	};
 	return `Brief (JSON):\n${JSON.stringify(payload)}`;
+}
+
+/**
+ * The one retry after a coverage failure: the same brief, the passage, and the words above the
+ * level, to be replaced by allowed words (or kept only if glossed, at most 2 or 3).
+ */
+export function buildRewriteUser(brief: PassageBrief, previous: Response, aboveLevel: readonly string[]): string {
+	return `${buildUser(brief)}
+
+Your passage used too many words above the level: ${aboveLevel.join(', ')}.
+Rewrite it on the same topic, replacing those words with words from allowed_words (or simpler phrasing). Return the whole result again (title, passage, 2 questions, glossary) in the same format. Previous passage (JSON):
+${JSON.stringify({ title_en: previous.title_en, passage_en: previous.passage_en })}`;
 }
 
 export const Question = z.object({

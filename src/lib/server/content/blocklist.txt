@@ -1,5 +1,7 @@
 # Content blocklist for imported sentences (hand-maintained; Phase 5a).
-# One term per line; "#" starts a comment; "word*" matches any word starting with "word".
+# One term per line; "#" starts a comment; "word*" matches any word starting with "word"; a line
+# of several words is a phrase matched word by word on lemmas ("make love" -> "made love").
+# Checked at import (blocked = 1), and again by the cloze, drill and reading rules when items are built.
 # NGSL headwords match all their forms (kill -> killed, killing). Matching sentences are imported
 # with blocked = 1 and never deleted: edit this file, then `npm run content:import -- --reblock`.
 
@@ -20,6 +22,9 @@ cock
 wank*
 
 # Sexual content
+make love
+sleep together
+have sex
 sex
 sexy
 sexual*
@@ -37,8 +42,33 @@ molest*
 # Suicide and self-harm
 suicid*
 overdose*
+self-harm*
+hang himself
+hang herself
+hang myself
+hang yourself
+hang themselves
+cut myself
+cut himself
+cut herself
+kill myself
+kill himself
+kill herself
 
-# Drugs
+# Death (Phase 11: not lesson material for a calm daily routine)
+die
+dead
+death*
+deadly
+corpse*
+coffin*
+funeral*
+
+# Drugs and drinking
+drunk*
+hangover*
+alcoholic*
+get high
 drug
 cocaine
 heroin
@@ -60,3 +90,11 @@ terroris*
 massacre*
 assassin*
 behead*
+choke*
+punch*
+slaughter*
+bleed*
+blood*
+weapon*
+pistol*
+rifle*

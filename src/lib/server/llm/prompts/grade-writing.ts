@@ -3,7 +3,7 @@
 import { FEEDBACK_RULES, RUBRIC, TASK_RELEVANCE, TOPIC_CODE_GUIDE, WritingFeedback } from './feedback.ts';
 import { describeBand } from './levels.ts';
 
-export const PROMPT_VERSION = 'grade-writing@2';
+export const PROMPT_VERSION = 'grade-writing@3';
 export const PURPOSE = 'grade_writing';
 export const Response = WritingFeedback;
 
