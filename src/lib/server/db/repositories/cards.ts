@@ -1,6 +1,6 @@
-import { and, asc, eq, inArray, isNotNull, lte, min, ne, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, lte, min, ne, or, sql } from 'drizzle-orm';
 import type { DbOrTx } from '../client.ts';
-import { cards } from '../schema.ts';
+import { cards, clozeItems } from '../schema.ts';
 
 export type CardRow = typeof cards.$inferSelect;
 export type NewCard = Omit<typeof cards.$inferInsert, 'id'>;
@@ -29,9 +29,32 @@ export function cardsRepo(db: DbOrTx) {
 				.limit(limit)
 				.all();
 		},
-		/** Cards never reviewed, oldest first (creation order). */
+		/**
+		 * Cards never reviewed, oldest first (creation order), under the daily new-card limit: cards
+		 * on mined errors are left out (see newMinedCards).
+		 */
 		newCards(limit: number): CardRow[] {
-			return db.select().from(cards).where(eq(cards.state, 'New')).orderBy(asc(cards.id)).limit(limit).all();
+			return db
+				.select({ card: cards })
+				.from(cards)
+				.leftJoin(clozeItems, eq(clozeItems.id, cards.clozeItemId))
+				.where(and(eq(cards.state, 'New'), or(isNull(clozeItems.gapType), ne(clozeItems.gapType, 'user_error'))))
+				.orderBy(asc(cards.id))
+				.limit(limit)
+				.all()
+				.map((r) => r.card);
+		},
+		/** New cards on the learner's own mined errors (exempt from the daily new-card limit), oldest first. */
+		newMinedCards(limit: number): CardRow[] {
+			return db
+				.select({ card: cards })
+				.from(cards)
+				.innerJoin(clozeItems, eq(clozeItems.id, cards.clozeItemId))
+				.where(and(eq(cards.state, 'New'), eq(clozeItems.gapType, 'user_error')))
+				.orderBy(asc(cards.id))
+				.limit(limit)
+				.all()
+				.map((r) => r.card);
 		},
 		counts(now: Date): CardCounts {
 			const row = db

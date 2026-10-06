@@ -6,11 +6,18 @@ import { cardsRepo } from '../../src/lib/server/db/repositories/cards.ts';
 import { clozeItemsRepo } from '../../src/lib/server/db/repositories/cloze-items.ts';
 import { newCardFields } from '../../src/lib/server/srs/mapping.ts';
 import { appLlmDeps } from '../../src/lib/server/generation/app-llm.ts';
+import { unlimitedBudget } from '../../src/lib/server/generation/batch.ts';
 import { buildCloze } from '../../src/lib/server/generation/cloze/build.ts';
+import { DRILL_CODES, buildDrills } from '../../src/lib/server/generation/drills/build.ts';
+import { buildReading } from '../../src/lib/server/generation/reading/build.ts';
 import { importContent } from '../../src/lib/server/generation/content-files.ts';
 import { loadGenerationContext } from '../../src/lib/server/generation/context.ts';
 
-export async function seedTestDatabase(path: string, options: { clozePerBand: number }): Promise<Map<number, number>> {
+/**
+ * `anchors`: also reading passages (bands 1-3) and error drills (every code, bands 1-2) for Đọc
+ * and Viết sessions, all from the canned LLM.
+ */
+export async function seedTestDatabase(path: string, options: { clozePerBand: number; anchors?: boolean }): Promise<Map<number, number>> {
 	for (const suffix of ['', '-wal', '-shm']) rmSync(`${path}${suffix}`, { force: true });
 	const db = createDb(path);
 	migrate(db);
@@ -21,6 +28,15 @@ export async function seedTestDatabase(path: string, options: { clozePerBand: nu
 		await buildCloze(
 			{ bands: [band, band], limit: options.clozePerBand, maxCalls: 1000, dailyCap: 1_000_000 },
 			{ llm, isWord: context.isWord, blocklist: context.blocklist }
+		);
+	}
+	if (options.anchors) {
+		const budget = unlimitedBudget;
+		await buildReading([1, 2, 3].map((band) => ({ band, count: 6 })), { llm, forms: context.forms, blocklist: context.blocklist }, { budget });
+		await buildDrills(
+			DRILL_CODES.flatMap((topic) => [1, 2].map((band) => ({ topic, band, count: 4 }))),
+			{ llm, forms: context.forms, classes: context.classes, blocklist: context.blocklist },
+			{ budget }
 		);
 	}
 	const pool = clozeItemsRepo(db).availableByBand();

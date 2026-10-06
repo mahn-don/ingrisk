@@ -38,7 +38,7 @@ describe('startSession', () => {
 		expect(items).toHaveLength(5);
 		const row = sessionsRepo(db).byId(sessionId)!;
 		expect(row).toMatchObject({ status: 'in_progress', shape: 'quick', budgetMin: 5, startedAt: T0 });
-		expect(row.servedJson).toEqual(items.map((i) => ({ cardId: i.cardId, mode: i.mode, isNew: i.isNew })));
+		expect(row.servedJson).toEqual({ cards: items.map((i) => ({ cardId: i.cardId, mode: i.mode, isNew: i.isNew })), drills: [], anchor: null });
 		const next = startSession(db, at(MINUTE), {});
 		expect(sessionsRepo(db).byId(sessionId)).toMatchObject({ status: 'abandoned', endedAt: at(MINUTE) });
 		expect(sessionsRepo(db).byId(next.sessionId!)?.budgetMin).toBe(8); // settings default
@@ -46,7 +46,7 @@ describe('startSession', () => {
 
 	it('stores nothing for an empty session', () => {
 		const { db } = setup();
-		expect(startSession(db, T0)).toEqual({ sessionId: null, startedAt: T0.getTime(), items: [], reason: 'no_content' });
+		expect(startSession(db, T0)).toEqual({ sessionId: null, startedAt: T0.getTime(), shape: 'quick', items: [], drills: [], anchor: null, feedback: [], reason: 'no_content' });
 		expect(sessionsRepo(db).inProgress()).toBeUndefined();
 	});
 });

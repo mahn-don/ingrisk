@@ -52,12 +52,12 @@ export default defineConfig({
 			{ APP_PASSWORD_HASH: passwordHash, LLM_CANNED: '1', NODE_ENV: 'test' },
 			`sh -c 'node tool/seed-test-db.ts --db ${SERVERS.placement.db} --per-band 40 && ${waitForBuild} npm run preview -- --port ${SERVERS.placement.port} --strictPort'`
 		),
-		// Sessions: seeded content, no LLM at all (a session never calls one).
+		// Sessions: seeded content with passages and drills; the canned LLM grades Viết writing.
 		server(
 			SERVERS.session.port,
 			SERVERS.session.db,
-			{ APP_PASSWORD_HASH: passwordHash },
-			`sh -c 'node tool/seed-test-db.ts --db ${SERVERS.session.db} --per-band 30 && ${waitForBuild} npm run preview -- --port ${SERVERS.session.port} --strictPort'`
+			{ APP_PASSWORD_HASH: passwordHash, LLM_CANNED: '1', NODE_ENV: 'test', CRON_SECRET: E2E_CRON_SECRET },
+			`sh -c 'node tool/seed-test-db.ts --db ${SERVERS.session.db} --per-band 30 --anchors && ${waitForBuild} npm run preview -- --port ${SERVERS.session.port} --strictPort'`
 		)
 	],
 	projects: [

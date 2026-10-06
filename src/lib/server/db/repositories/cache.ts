@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, between, count, desc, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
 import type { DbOrTx } from '../client.ts';
 import { CARD_KINDS, generatedCache } from '../schema.ts';
 
@@ -110,6 +110,54 @@ export function cacheRepo(db: DbOrTx) {
 				},
 				{ behavior: 'immediate' }
 			);
+		},
+		/** Whether an unserved validated item of a kind exists within `maxDistance` bands of `band`. */
+		hasUnservedNear(kind: CacheKind, band: number, maxDistance: number, paramsHash?: string): boolean {
+			return (
+				db
+					.select({ id: generatedCache.id })
+					.from(generatedCache)
+					.where(
+						and(
+							eq(generatedCache.kind, kind),
+							eq(generatedCache.validated, true),
+							isNull(generatedCache.servedAt),
+							between(generatedCache.levelBand, band - maxDistance, band + maxDistance),
+							paramsHash === undefined ? undefined : eq(generatedCache.paramsHash, paramsHash)
+						)
+					)
+					.limit(1)
+					.get() !== undefined
+			);
+		},
+		/**
+		 * Take the unserved validated item of a kind nearest to `band` (within `maxDistance`; ties: the
+		 * lower band, then the oldest), optionally of one params hash, and mark it served.
+		 */
+		takeNearest(kind: CacheKind, band: number, options: { maxDistance?: number; paramsHash?: string; now: Date }): CacheItem | undefined {
+			return db.transaction((tx) => {
+				const distance = sql<number>`abs(${generatedCache.levelBand} - ${band})`;
+				const row = tx
+					.select({ id: generatedCache.id })
+					.from(generatedCache)
+					.where(
+						and(
+							eq(generatedCache.kind, kind),
+							eq(generatedCache.validated, true),
+							isNull(generatedCache.servedAt),
+							options.maxDistance === undefined ? undefined : lte(distance, options.maxDistance),
+							options.paramsHash === undefined ? undefined : eq(generatedCache.paramsHash, options.paramsHash)
+						)
+					)
+					.orderBy(distance, asc(generatedCache.levelBand), asc(generatedCache.id))
+					.limit(1)
+					.get();
+				if (row === undefined) return undefined;
+				return tx.update(generatedCache).set({ servedAt: options.now }).where(eq(generatedCache.id, row.id)).returning().get();
+			});
+		},
+		byId(id: number): CacheItem | undefined {
+			return db.select().from(generatedCache).where(eq(generatedCache.id, id)).get();
 		},
 		/** Unserved validated items per kind and band. */
 		stock(): StockEntry[] {

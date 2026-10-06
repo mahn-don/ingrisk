@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, isNull, lte } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull, lte, ne } from 'drizzle-orm';
 import type { DbOrTx } from '../client.ts';
 import { cards, clozeItems, sentences } from '../schema.ts';
 
@@ -28,6 +28,8 @@ export interface SessionClozeItem {
 	enText: string;
 	viText: string;
 	hasStockNames: boolean;
+	tokenCount: number;
+	typingOnly: boolean;
 }
 
 export function clozeItemsRepo(db: DbOrTx) {
@@ -44,7 +46,9 @@ export function clozeItemsRepo(db: DbOrTx) {
 		grammarTopicId: clozeItems.grammarTopicId,
 		enText: sentences.enText,
 		viText: sentences.viText,
-		hasStockNames: sentences.hasStockNames
+		hasStockNames: sentences.hasStockNames,
+		tokenCount: clozeItems.tokenCount,
+		typingOnly: clozeItems.typingOnly
 	};
 	const withSentence = () =>
 		db
@@ -104,7 +108,15 @@ export function clozeItemsRepo(db: DbOrTx) {
 				.from(clozeItems)
 				.innerJoin(sentences, eq(clozeItems.sentenceId, sentences.id))
 				.leftJoin(cards, eq(cards.clozeItemId, clozeItems.id))
-				.where(and(eq(clozeItems.validated, true), isNull(cards.id), lte(clozeItems.levelBand, maxBand), eq(sentences.blocked, false)))
+				.where(
+					and(
+						eq(clozeItems.validated, true),
+						isNull(cards.id),
+						lte(clozeItems.levelBand, maxBand),
+						eq(sentences.blocked, false),
+						ne(clozeItems.gapType, 'user_error')
+					)
+				)
 				.orderBy(asc(clozeItems.levelBand), asc(clozeItems.id))
 				.all();
 		},
@@ -119,6 +131,20 @@ export function clozeItemsRepo(db: DbOrTx) {
 					.where(and(eq(clozeItems.validated, true), isNull(cards.id), lte(clozeItems.levelBand, maxBand), eq(sentences.blocked, false)))
 					.get()?.n ?? 0
 			);
+		},
+		/** A validated lexical item for this lexeme that has no card yet ("Thêm vào ôn tập"). */
+		uncardedLexicalFor(lexemeId: number): number | undefined {
+			return db
+				.select({ id: clozeItems.id })
+				.from(clozeItems)
+				.leftJoin(cards, eq(cards.clozeItemId, clozeItems.id))
+				.where(and(eq(clozeItems.validated, true), eq(clozeItems.gapType, 'lexical'), eq(clozeItems.lexemeId, lexemeId), isNull(cards.id)))
+				.orderBy(asc(clozeItems.levelBand), asc(clozeItems.id))
+				.limit(1)
+				.get()?.id;
+		},
+		byId(id: number): ClozeItemRow | undefined {
+			return db.select().from(clozeItems).where(eq(clozeItems.id, id)).get();
 		},
 		/** Whether any validated item exists at all. */
 		hasValidated(): boolean {

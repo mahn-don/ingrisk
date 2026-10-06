@@ -3,6 +3,7 @@ import { getDb, type DbOrTx } from '../client.ts';
 import { cacheRepo } from './cache.ts';
 import { cardsRepo } from './cards.ts';
 import { clozeItemsRepo } from './cloze-items.ts';
+import { drillResultsRepo } from './drill-results.ts';
 import { grammarTopicsRepo } from './grammar-topics.ts';
 import { jobLocksRepo } from './job-locks.ts';
 import { lexemesRepo } from './lexemes.ts';
@@ -33,7 +34,8 @@ export function createRepositories(db: DbOrTx) {
 		sentences: sentencesRepo(db),
 		clozeItems: clozeItemsRepo(db),
 		jobLocks: jobLocksRepo(db),
-		placement: placementRepo(db)
+		placement: placementRepo(db),
+		drillResults: drillResultsRepo(db)
 	};
 }
 

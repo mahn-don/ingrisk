@@ -25,7 +25,3 @@ when that phase starts; delete it when done.
   the cron call needs `Content-Type: application/json`.
 - **Phase 7:** add a nightly `authSessionsRepo.deleteExpired()` sweep (expired rows are already
   deleted when presented; this only tidies sessions that are never used again).
-- **Phase 9b:** error-mined cards must each create their own `sentences` row
-  (`source = 'user_error'`); otherwise the cards unique index
-  `(kind, lexeme_id, sentence_id, grammar_topic_id)` collapses every error card of the same topic
-  into one.

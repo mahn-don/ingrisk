@@ -3,7 +3,6 @@
 import type { DbOrTx } from '../db/client.ts';
 import { type PlacementResult, placementRepo } from '../db/repositories/placement.ts';
 import { profileRepo } from '../db/repositories/profile.ts';
-import { writingRepo } from '../db/repositories/writing.ts';
 import type { PartScore, PlacementLogEntry, PlacementSubscores, ReliabilityFlag, WritingError } from '../db/schema.ts';
 import { combine } from './combine.ts';
 import { type Cefr, type Equivalents, cefrRank, equivalents } from './scales.ts';
@@ -13,6 +12,11 @@ export interface GradedWriting {
 	cefr: Cefr;
 	correctedText: string;
 	errors: WritingError[];
+	/** Writing: answered the task. False keeps the CEFR out of every estimate. */
+	onTopic?: boolean | null;
+	taskNoteVi?: string | null;
+	/** Translation: the meaning came across. */
+	meaningOk?: boolean | null;
 }
 
 export interface FinishedParts {
@@ -67,6 +71,14 @@ export function buildResult(parts: FinishedParts, takenAt: Date): Omit<Placement
 }
 
 /** The result with its writing graded: the combination re-run with the writing's CEFR. */
+/** The result once its writing turned out to be off topic: scored, but the CEFR is not used. */
+export function offTopicResult(result: PlacementResult): Partial<PlacementResult> {
+	return {
+		writingStatus: 'scored',
+		reliabilityFlags: [...new Set([...result.reliabilityFlags, 'writing_off_topic' as const])]
+	};
+}
+
 export function refineResult(result: PlacementResult, writing: Cefr): Partial<PlacementResult> {
 	const combined = combine({ vocabBand: result.vocabBand, clozeTheta: result.clozeTheta, writing });
 	return {
@@ -100,21 +112,6 @@ export function applyResultToProfile(db: DbOrTx, result: PlacementResult, now: D
 		},
 		now
 	);
-	return true;
-}
-
-/**
- * Store a grade for a queued writing submission. If it belongs to a placement result, refine that
- * result (and the profile, when it is the latest). Returns false if the submission was not queued
- * (graded already, e.g. by a parallel run).
- */
-export function applyWritingGrade(db: DbOrTx, submissionId: number, graded: GradedWriting, now: Date): boolean {
-	const writing = writingRepo(db);
-	if (writing.byId(submissionId)?.status !== 'queued') return false;
-	writing.markScored(submissionId, { correctedText: graded.correctedText, errors: graded.errors, cefrEstimate: graded.cefr }, now);
-	const placement = placementRepo(db);
-	const result = placement.resultByWritingSubmission(submissionId);
-	if (result !== undefined) applyResultToProfile(db, placement.updateResult(result.id, refineResult(result, graded.cefr)), now);
 	return true;
 }
 

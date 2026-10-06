@@ -18,7 +18,9 @@ import {
 
 export const CARD_KINDS = ['cloze', 'translate', 'grammar', 'reading', 'error'] as const;
 /** What a cloze gap tests (Phase 5a). */
-export const CLOZE_GAP_TYPES = ['lexical', 'article', 'preposition', 'verb_form'] as const;
+export const CLOZE_GAP_TYPES = ['lexical', 'article', 'preposition', 'verb_form', 'user_error'] as const;
+/** Writing anchors (Phase 9b): free writing, or a VI→EN translation. */
+export const WRITING_TASK_KINDS = ['writing', 'translation'] as const;
 export const WRITING_STATUSES = ['queued', 'scored', 'failed'] as const;
 export const WIRE_FORMATS = ['openai', 'anthropic'] as const;
 /** How a provider is asked for structured output (see src/lib/server/llm/). */
@@ -95,7 +97,7 @@ export interface PlacementLogEntry {
 	real?: boolean;
 }
 
-export const RELIABILITY_FLAGS = ['many_false_alarms', 'cloze_skipped'] as const;
+export const RELIABILITY_FLAGS = ['many_false_alarms', 'cloze_skipped', 'writing_off_topic'] as const;
 export type ReliabilityFlag = (typeof RELIABILITY_FLAGS)[number];
 
 /** One ranked error from writing feedback (Part II §5 WritingFeedback schema). */
@@ -334,6 +336,10 @@ export const clozeItems = sqliteTable(
 		gapType: text('gap_type', { enum: CLOZE_GAP_TYPES }).notNull(),
 		/** Index of the gap in the sentence's token list (see generation/cloze/tokens.ts). */
 		tokenIndex: integer('token_index').notNull(),
+		/** Tokens the gap spans (1, or up to 4 for a mined error's correction; migration 0008). */
+		tokenCount: integer('token_count').notNull().default(1),
+		/** Served in typing mode only (a mined error without enough distractors; migration 0008). */
+		typingOnly: integer('typing_only', { mode: 'boolean' }).notNull().default(false),
 		answer: text('answer').notNull(),
 		/** The four options in display order (shuffled deterministically); '—' means "no word". */
 		options: text('options', { mode: 'json' }).$type<string[]>().notNull(),
@@ -459,6 +465,21 @@ export interface ServedItem {
 	isNew: boolean;
 }
 
+/** What a session served (Phase 9b); 9a rows hold a bare ServedItem[]. */
+export interface ServedSession {
+	cards: ServedItem[];
+	drills: { cacheId: number; topicCode: (typeof TOPIC_CODES)[number] }[];
+	anchor:
+		| { type: 'reading'; cacheId: number; questions: number; glossary: Record<string, number | null> }
+		| { type: 'writing'; promptId: string }
+		| { type: 'translation'; sentenceId: number }
+		| null;
+}
+
+/** The served session of a row, whichever format it was stored in. */
+export const servedOf = (served: ServedItem[] | ServedSession): ServedSession =>
+	Array.isArray(served) ? { cards: served, drills: [], anchor: null } : served;
+
 /** What a finished session reports (stored, so a repeated finish returns the same). */
 export type SessionSummary = FinishSummary;
 
@@ -481,7 +502,7 @@ export const sessions = sqliteTable(
 		// Phase 9a (migration 0007)
 		status: text('status', { enum: SESSION_STATUSES }).notNull().default('finished'),
 		/** The exact items served; finish accepts results for these cards only. */
-		servedJson: text('served_json', { mode: 'json' }).$type<ServedItem[]>().notNull().default([]),
+		servedJson: text('served_json', { mode: 'json' }).$type<ServedItem[] | ServedSession>().notNull().default([]),
 		finishedAt: integer('finished_at', { mode: 'timestamp_ms' }),
 		summaryJson: text('summary_json', { mode: 'json' }).$type<SessionSummary>()
 	},
@@ -561,13 +582,48 @@ export const writingSubmissions = sqliteTable(
 		status: text('status', { enum: WRITING_STATUSES }).notNull().default('queued'),
 		submittedAt: integer('submitted_at', { mode: 'timestamp_ms' }).notNull(),
 		scoredAt: integer('scored_at', { mode: 'timestamp_ms' }),
-		feedbackSeenAt: integer('feedback_seen_at', { mode: 'timestamp_ms' })
+		feedbackSeenAt: integer('feedback_seen_at', { mode: 'timestamp_ms' }),
+		// Phase 9b (migration 0008)
+		taskKind: text('task_kind', { enum: WRITING_TASK_KINDS }).notNull().default('writing'),
+		/** The writing prompt's id (writing-prompts.json), so recent prompts are not repeated. */
+		promptId: text('prompt_id'),
+		/** The translation's source sentence (never served twice). */
+		sentenceId: integer('sentence_id').references(() => sentences.id, { onDelete: 'set null' }),
+		/** Translation: one valid English version, shown with the feedback. */
+		referenceEn: text('reference_en'),
+		/** Grading: did the text answer the task? False keeps its CEFR out of every estimate. */
+		onTopic: integer('on_topic', { mode: 'boolean' }),
+		taskNoteVi: text('task_note_vi'),
+		/** Translation grading: the meaning came across. */
+		meaningOk: integer('meaning_ok', { mode: 'boolean' }),
+		/** When its errors were mined into cloze cards, and how many cards that made. */
+		minedAt: integer('mined_at', { mode: 'timestamp_ms' }),
+		minedCount: integer('mined_count').notNull().default(0)
 	},
 	(t) => [
 		index('writing_submissions_status').on(t.status),
 		check('writing_submissions_status', oneOf(t.status, WRITING_STATUSES)),
-		check('writing_submissions_cefr_estimate', oneOf(t.cefrEstimate, CEFR_LEVELS))
+		check('writing_submissions_cefr_estimate', oneOf(t.cefrEstimate, CEFR_LEVELS)),
+		check('writing_submissions_task_kind', oneOf(t.taskKind, WRITING_TASK_KINDS))
 	]
+);
+
+/** One answered error drill (Phase 9b): one-off practice, not a card; feeds the weakness profile. */
+export const drillResults = sqliteTable(
+	'drill_results',
+	{
+		id: integer('id').primaryKey({ autoIncrement: true }),
+		sessionId: integer('session_id')
+			.notNull()
+			.references(() => sessions.id, { onDelete: 'cascade' }),
+		cacheId: integer('cache_id')
+			.notNull()
+			.references(() => generatedCache.id, { onDelete: 'restrict' }),
+		topicCode: text('topic_code', { enum: TOPIC_CODES }).notNull(),
+		correct: integer('correct', { mode: 'boolean' }).notNull(),
+		answeredAt: integer('answered_at', { mode: 'timestamp_ms' }).notNull()
+	},
+	(t) => [index('drill_results_answered_at').on(t.answeredAt), check('drill_results_topic_code', oneOf(t.topicCode, TOPIC_CODES))]
 );
 
 // --- LLM call log -------------------------------------------------------------------------------

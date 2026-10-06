@@ -45,7 +45,7 @@ test.describe('login and logout', () => {
 		await page.getByRole('link', { name: 'Hôm nay' }).click();
 		await expect(page.getByTestId('count-due')).toHaveText('0');
 		await expect(page.getByTestId('count-new')).toHaveText('0');
-		await expect(page.getByRole('link', { name: 'Bắt đầu học' })).toHaveAttribute('href', '/session?budget=8');
+		await expect(page.getByRole('link', { name: 'Bắt đầu học' })).toHaveAttribute('href', '/session?budget=8&shape=quick');
 	});
 
 	test('a hostile next falls back to /', async ({ page }) => {

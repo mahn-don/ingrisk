@@ -1,5 +1,5 @@
 {
-	"description": "Fixtures for npm run eval:grading: 8 answers with known Vietnamese-learner errors (expected_codes), 2 correct translations that differ from the reference (must get zero errors and meaning_ok true), and 2 writing samples (one weak, one strong).",
+	"description": "Fixtures for npm run eval:grading: 8 answers with known Vietnamese-learner errors (expected_codes), 2 correct translations that differ from the reference (must get zero errors and meaning_ok true), and 2 writing samples (one weak, one strong) and 1 off-topic writing sample (expected_on_topic false: its CEFR must not count).",
 	"items": [
 		{
 			"id": "tns-art",
@@ -139,6 +139,16 @@
 			"user_text": "Dear Ms Hoa,\n\nI am writing to ask for two days of leave next Thursday and Friday. My grandmother is having an operation in Hue, and my family would like me to be with her while she recovers.\n\nBefore I leave, I will finish the monthly sales report and send it to you on Wednesday afternoon. Minh has kindly agreed to answer my clients' emails, and I have already shown him where the contract files are. If anything urgent comes up, I will check my messages every evening and reply as soon as I can.\n\nThank you for considering my request. Please let me know if you need any more information.\n\nBest regards,\nLan",
 			"expected_codes": [],
 			"note": "Strong sample: expect B2 or above and few or no errors."
+		},
+		{
+			"id": "off-topic",
+			"type": "writing",
+			"level_band": 3,
+			"prompt_vi": "Hôm nay bạn đã ăn gì? Kể về bữa sáng, bữa trưa và bữa tối của bạn.",
+			"user_text": "I was a student at that time. I liked football very much and I played with my friends every afternoon after school.",
+			"expected_codes": [],
+			"expected_on_topic": false,
+			"note": "Correct English that ignores the task (meals): on_topic must be false, with a Vietnamese task note."
 		}
 	]
 }

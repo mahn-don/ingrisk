@@ -51,6 +51,21 @@ describe('gradeQueuedWritings', () => {
 		expect(summary).toEqual({ graded: 0, failed: 1, remaining: 2 });
 	});
 
+	it('grades a queued translation against its reference, and mines its errors into cards', async () => {
+		const { fx, llm, requests } = cannedWorld();
+		const sub = writingRepo(fx.db).queue({
+			sessionId: null,
+			prompt: 'Hôm qua chúng tôi mua cá.',
+			userText: 'Yesterday we buyed fish.',
+			submittedAt: new Date(0),
+			taskKind: 'translation',
+			referenceEn: 'Yesterday we bought fish.'
+		});
+		expect(await gradeQueuedWritings({ maxCalls: 5 }, { llm, dailyCap: 100 })).toEqual({ graded: 1, failed: 0, remaining: 0 });
+		expect(requests.map((r) => r.purpose)).toEqual(['grade_translation']);
+		expect(writingRepo(fx.db).byId(sub.id)).toMatchObject({ status: 'scored', meaningOk: true, onTopic: null, minedCount: 1, correctedText: 'Yesterday we bought fish.' });
+	});
+
 	it('respects the call budget', async () => {
 		const { fx, llm } = cannedWorld();
 		for (const n of [1, 2]) writingRepo(fx.db).queue({ sessionId: null, prompt: 'Viết.', userText: `Text number ${n}.`, submittedAt: new Date(n) });

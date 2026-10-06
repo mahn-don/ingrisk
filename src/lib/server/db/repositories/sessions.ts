@@ -1,6 +1,6 @@
-import { and, asc, eq, gte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, ne } from 'drizzle-orm';
 import type { DbOrTx } from '../client.ts';
-import { type ServedItem, type SessionSummary, sessions } from '../schema.ts';
+import { type ServedItem, type ServedSession, type SessionSummary, sessions } from '../schema.ts';
 
 export type SessionRow = typeof sessions.$inferSelect;
 export type FinishedSession = Omit<typeof sessions.$inferInsert, 'id'>;
@@ -42,7 +42,7 @@ export function sessionsRepo(db: DbOrTx) {
 				.run().changes;
 		},
 		/** Start a session (in progress). `placeholderId` fills client_session_id until finish. */
-		start(values: { startedAt: Date; budgetMin: number; shape: SessionRow['shape']; served: ServedItem[]; placeholderId: string }): SessionRow {
+		start(values: { startedAt: Date; budgetMin: number; shape: SessionRow['shape']; served: ServedItem[] | ServedSession; placeholderId: string }): SessionRow {
 			return db
 				.insert(sessions)
 				.values({
@@ -72,6 +72,26 @@ export function sessionsRepo(db: DbOrTx) {
 				.get();
 			if (row === undefined) throw new Error(`session ${id} is not in progress`);
 			return row;
+		},
+		/** The most recent finished session that was not quick (Đọc/Viết rotation). */
+		lastFinishedNonQuick(): SessionRow | undefined {
+			return db
+				.select()
+				.from(sessions)
+				.where(and(eq(sessions.status, 'finished'), ne(sessions.shape, 'quick')))
+				.orderBy(desc(sessions.finishedAt), desc(sessions.id))
+				.limit(1)
+				.get();
+		},
+		/** The most recent finished Viết session (writing / translation alternation). */
+		lastFinishedWrite(): SessionRow | undefined {
+			return db
+				.select()
+				.from(sessions)
+				.where(and(eq(sessions.status, 'finished'), eq(sessions.shape, 'write')))
+				.orderBy(desc(sessions.finishedAt), desc(sessions.id))
+				.limit(1)
+				.get();
 		},
 		/** Sessions finished at or after `from`, oldest first. */
 		finishedSince(from: Date): SessionRow[] {

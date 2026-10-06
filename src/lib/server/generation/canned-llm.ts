@@ -11,6 +11,24 @@ import { tokenize } from './tokens.ts';
 
 export const CANNED_MODEL = 'canned-dry-run';
 
+/** A writing containing this is graded off topic by the canned grader (tests only). */
+export const OFF_TOPIC_MARKER = 'OFFTOPIC';
+/**
+ * The first grading of a text containing this fails (both the reply and its repair round are
+ * invalid), so the writing is queued; later gradings succeed (tests of "graded later").
+ */
+export const GRADE_LATER_MARKER = 'GRADELATER';
+const GRADE_LATER_FAILURES = 2;
+
+/** Learner errors the canned grader reports: [wrong, correction, topic code]. */
+export const CANNED_ERRORS: readonly (readonly [string, string, string])[] = [
+	['buyed', 'bought', 'TNS'],
+	['goed', 'went', 'TNS'],
+	['childs', 'children', 'PLU'],
+	['depend of', 'depend on', 'PRE'],
+	['she go', 'she goes', 'SVA']
+];
+
 export interface CannedOptions {
 	forms: FormIndex;
 	blocklist: Pick<BlocklistMatcher, 'isBlocked'>;
@@ -143,15 +161,31 @@ export function cannedFetch(opts: CannedOptions): typeof globalThis.fetch {
 			answer_index: 0,
 			explanation_vi: 'Câu này có trong bài đọc.'
 		});
-		return { title_en: `About ${String(brief.topic)}`, passage_en: chosen.join(' '), questions: [question(0), question(1)], glossary: [] };
+		// Two longer words of the passage, glossed (glossary words must appear in the passage).
+		const glossary = [...new Set(chosen.join(' ').match(/\b[a-z]{6,}\b/g) ?? [])].slice(0, 2).map((word) => ({ word, vi: `(nghĩa của ${word})` }));
+		return { title_en: `About ${String(brief.topic)}`, passage_en: chosen.join(' '), questions: [question(0), question(1)], glossary };
 	};
 
-	const feedback = (learner: string, band: number) => ({
-		corrected_text: learner,
-		errors: [],
-		cefr_estimate: ['A1', 'A1', 'A2', 'A2', 'B1', 'B1', 'B2', 'B2'][Math.min(Math.max(band, 1), 8) - 1],
-		scores: { range: 3, accuracy: 3, coherence: 3 }
-	});
+	// Known learner errors the canned grader "finds" (tests mine them into cards).
+	const feedback = (learner: string, band: number) => {
+		let corrected = learner;
+		const errors: Item[] = [];
+		for (const [wrong, right, code] of CANNED_ERRORS) {
+			const pattern = new RegExp(`\\b${wrong}\\b`, 'i');
+			const match = pattern.exec(corrected);
+			if (match === null || errors.length >= 3) continue;
+			errors.push({ original: match[0], correction: right, topic_code: code, explanation_vi: `Dùng "${right}", không dùng "${match[0]}".` });
+			corrected = corrected.replace(pattern, right);
+		}
+		return {
+			corrected_text: corrected,
+			errors,
+			cefr_estimate: ['A1', 'A1', 'A2', 'A2', 'B1', 'B1', 'B2', 'B2'][Math.min(Math.max(band, 1), 8) - 1],
+			scores: { range: 3, accuracy: 3, coherence: 3 }
+		};
+	};
+
+	const gradeLaterSeen = new Map<string, number>();
 
 	return (async (_input: string | URL | Request, init?: RequestInit) => {
 		const body = JSON.parse(String(init?.body)) as {
@@ -163,6 +197,12 @@ export function cannedFetch(opts: CannedOptions): typeof globalThis.fetch {
 		const user = body.messages.find((m) => m.role === 'user')?.content ?? '';
 		const payload = JSON.parse(user.slice(user.indexOf('{'))) as { items: Item[] } & Item;
 		if (opts.onRequest?.(payload, purpose) === 'invalid') return reply({ items: 'not an array' });
+		const learnerText = String(payload.learner_text ?? payload.learner_translation ?? '');
+		if (learnerText.includes(GRADE_LATER_MARKER)) {
+			const seen = gradeLaterSeen.get(learnerText) ?? 0;
+			gradeLaterSeen.set(learnerText, seen + 1);
+			if (seen < GRADE_LATER_FAILURES) return reply({ items: 'not an array' });
+		}
 		switch (purpose) {
 			case 'cloze_distractors':
 				return reply({
@@ -221,8 +261,15 @@ export function cannedFetch(opts: CannedOptions): typeof globalThis.fetch {
 						})
 					}))
 				});
-			case 'grade_writing':
-				return reply(feedback(String(payload.learner_text), Number(/band (\d)/.exec(String(payload.learner_level))?.[1] ?? 1)));
+			case 'grade_writing': {
+				const text = String(payload.learner_text);
+				const onTopic = !text.includes(OFF_TOPIC_MARKER);
+				return reply({
+					...feedback(text, Number(/band (\d)/.exec(String(payload.learner_level))?.[1] ?? 1)),
+					on_topic: onTopic,
+					task_note_vi: onTopic ? '' : 'Đề bài hỏi về một chủ đề khác; hãy viết đúng chủ đề nhé.'
+				});
+			}
 			case 'grade_translation':
 				return reply({
 					...feedback(String(payload.learner_translation), Number(/band (\d)/.exec(String(payload.learner_level))?.[1] ?? 1)),

@@ -6,13 +6,15 @@ import { openaiContent, openaiProvider, scriptedFetch, setupProviders, testDeps 
 import { gradeTranslation, gradeWriting, guardErrors, toDisplay } from './grading.ts';
 
 const error = (original: string, correction: string, topic_code = 'SVA') => ({ original, correction, topic_code, explanation_vi: 'Sau "she" động từ thêm -s.' });
-const feedback = (errors: object[] = [error('go', 'goes')], extra: object = {}) => ({
+const base = (errors: object[] = [error('go', 'goes')], extra: object = {}) => ({
 	corrected_text: 'She goes to work.',
 	errors,
 	cefr_estimate: 'A2',
 	scores: { range: 2, accuracy: 3, coherence: 4 },
 	...extra
 });
+/** Writing feedback (with the task-relevance fields). */
+const feedback = (errors?: object[], extra: object = {}) => base(errors, { on_topic: true, task_note_vi: '', ...extra });
 
 describe('WritingFeedback schema', () => {
 	it('parses the Part II §5 shape', () => {
@@ -28,6 +30,11 @@ describe('WritingFeedback schema', () => {
 		expect(WritingFeedback.safeParse(feedback([error('go', 'goes', 'GRAMMAR')])).success).toBe(false);
 		expect(WritingFeedback.safeParse(feedback(undefined, { scores: { range: 6, accuracy: 3, coherence: 3 } })).success).toBe(false);
 		expect(WritingFeedback.safeParse(feedback(undefined, { tips: 'x' })).success).toBe(false);
+	});
+
+	it('requires the task-relevance verdict and note', () => {
+		expect(WritingFeedback.safeParse(base()).success).toBe(false);
+		expect(WritingFeedback.parse(feedback(undefined, { on_topic: false, task_note_vi: 'Đề hỏi về bữa ăn.' }))).toMatchObject({ on_topic: false });
 	});
 
 	it('sends no array-size or numeric constraints to Anthropic', () => {
@@ -61,13 +68,13 @@ describe('grading services', () => {
 		const result = await gradeWriting({ prompt_vi: 'Viết về công việc.', user_text: 'She go to work.', level_band: 2, feedback_mode: 'indirect' }, testDeps(db, fetch).deps);
 		expect(result.feedback.corrected_text).toBe('She goes to work.');
 		expect(result.display).not.toHaveProperty('corrected_text');
-		expect(result.promptVersion).toBe('grade-writing@1');
+		expect(result.promptVersion).toBe('grade-writing@2');
 		expect(JSON.parse((requests[0].body.messages as { content: string }[])[1].content.split('\n')[1]).learner_text).toBe('She go to work.');
 	});
 
 	it('gradeTranslation accepts meaning_ok and a correct answer with no errors', async () => {
 		const { db } = setupProviders(openaiProvider);
-		const answer = feedback([], { corrected_text: 'I usually take the bus to work.', meaning_ok: true });
+		const answer = base([], { corrected_text: 'I usually take the bus to work.', meaning_ok: true });
 		const { fetch } = scriptedFetch([openaiContent(JSON.stringify(answer))]);
 		const result = await gradeTranslation(
 			{ vi: 'Tôi thường đi làm bằng xe buýt.', reference_en: 'I usually go to work by bus.', user_en: 'I usually take the bus to work.', level_band: 2 },

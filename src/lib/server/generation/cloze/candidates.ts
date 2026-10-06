@@ -276,7 +276,7 @@ export function sentenceCandidates(sentence: SentenceInput, deps: CandidateDeps)
 	const out: Candidate[] = lexical === null ? [] : [lexical];
 	const start = hashString(`grammar|${sentence.id}`) % GRAMMAR_TYPES.length;
 	for (let k = 0; k < GRAMMAR_TYPES.length; k++) {
-		const type = GRAMMAR_TYPES[(start + k) % GRAMMAR_TYPES.length] as Exclude<GapType, 'lexical'>;
+		const type = GRAMMAR_TYPES[(start + k) % GRAMMAR_TYPES.length] as Exclude<GapType, 'lexical' | 'user_error'>;
 		const pool = all[type].filter((c) => c.tokenIndex !== lexical?.tokenIndex);
 		const pick = seededPick(pool, `grammar|${sentence.id}|${k}`);
 		if (pick !== undefined) {

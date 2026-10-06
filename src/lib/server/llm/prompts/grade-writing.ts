@@ -1,9 +1,9 @@
 // Prompt: grade a short piece of learner writing (live, at answer time).
 // Bump PROMPT_VERSION whenever the wording or schema changes.
-import { FEEDBACK_RULES, RUBRIC, TOPIC_CODE_GUIDE, WritingFeedback } from './feedback.ts';
+import { FEEDBACK_RULES, RUBRIC, TASK_RELEVANCE, TOPIC_CODE_GUIDE, WritingFeedback } from './feedback.ts';
 import { describeBand } from './levels.ts';
 
-export const PROMPT_VERSION = 'grade-writing@1';
+export const PROMPT_VERSION = 'grade-writing@2';
 export const PURPOSE = 'grade_writing';
 export const Response = WritingFeedback;
 
@@ -13,7 +13,9 @@ ${FEEDBACK_RULES}
 
 ${TOPIC_CODE_GUIDE}
 
-${RUBRIC}`;
+${RUBRIC}
+
+${TASK_RELEVANCE}`;
 
 export interface WritingInput {
 	prompt_vi: string;

@@ -6,12 +6,15 @@ import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { type Algorithm, hash } from '@node-rs/argon2';
 import { type Page, chromium } from '@playwright/test';
 import { parseCli, positiveInt } from './lib/cli.ts';
-import type { SessionItem, StartResponse } from '../src/lib/session/types.ts';
+import { createDb } from '../src/lib/server/db/client.ts';
+import { appLlmDeps } from '../src/lib/server/generation/app-llm.ts';
+import { gradeQueuedWritings } from '../src/lib/server/grading/queued.ts';
+import type { Anchor, SessionItem, StartResponse } from '../src/lib/session/types.ts';
 import { addDueCards, seedTestDatabase } from './lib/test-content.ts';
 
 const args = parseCli({
 	command: 'npm run screenshots --',
-	summary: 'Screenshot Login, Home, Stats, Settings, /dev/components, the placement test and a session (390×844, light and dark) into tmp/screens/.',
+	summary: 'Screenshot Login, Home, Stats, Settings, /dev/components, the placement test and Nhanh/Đọc/Viết sessions (390×844, light and dark) into tmp/screens/.',
 	usage: ['--port N           Port for the temporary dev server (default 5199); CHROMIUM_PATH picks a Chromium binary'],
 	example: '--port 5199',
 	options: { port: { type: 'string', default: '5199' } }
@@ -23,7 +26,7 @@ const port = positiveInt('port', args.port);
 const origin = `http://localhost:${port}`;
 rmSync(OUT, { recursive: true, force: true });
 mkdirSync(OUT, { recursive: true });
-await seedTestDatabase(`${OUT}/app.db`, { clozePerBand: 30 });
+await seedTestDatabase(`${OUT}/app.db`, { clozePerBand: 30, anchors: true });
 
 const server = spawn('npx', ['vite', 'dev', '--port', String(port), '--strictPort'], {
 	detached: true,
@@ -106,6 +109,9 @@ async function session(page: Page, shot: (name: string, fullPage?: boolean) => P
 	const started = page.waitForResponse('**/api/session/start');
 	await page.goto(`${origin}/session?budget=5`);
 	const { items } = (await (await started).json()) as StartResponse & { items: SessionItem[] };
+	// The placement writing's feedback comes first: dismiss it (feedbackAtStart photographs one).
+	await page.locator('[data-testid="session-item"], [data-testid="session-feedback"]').first().waitFor();
+	while (await page.getByTestId('session-feedback').isVisible()) await page.getByRole('button', { name: 'Đã xem' }).click();
 	await page.getByTestId('session-item').waitFor();
 	const taken = new Set<string>();
 	const once = async (name: string) => {
@@ -144,6 +150,107 @@ async function session(page: Page, shot: (name: string, fullPage?: boolean) => P
 	await shot('session-done');
 }
 
+type Shot = (name: string, fullPage?: boolean) => Promise<void>;
+type Started = Extract<StartResponse, { sessionId: number }>;
+const label = (option: string) => (option === '—' ? '(không cần từ nào)' : option);
+
+/** Open a session; returns what the server composed. */
+async function openSession(page: Page, query: string): Promise<StartResponse> {
+	const started = page.waitForResponse('**/api/session/start');
+	await page.goto(`${origin}/session?${query}`);
+	const body = (await (await started).json()) as StartResponse;
+	await page.waitForLoadState('networkidle');
+	return body;
+}
+
+/** Answer the cards on screen correctly, then the drills (the first one photographed). */
+async function playCardsAndDrills(page: Page, session: Started, shot: Shot | null) {
+	while (await page.getByTestId('session-item').isVisible()) {
+		const id = Number(await page.getByTestId('session-item').getAttribute('data-card-id'));
+		const item = session.items.find((i) => i.cardId === id)!;
+		if (item.mode === 'typing') {
+			await page.getByLabel('Câu trả lời của bạn').fill(item.answer);
+			await page.getByRole('button', { name: 'Kiểm tra' }).click();
+		} else await page.getByTestId('session-item').getByRole('button', { name: label(item.answer), exact: true }).click();
+		await page.getByTestId('feedback').getByRole('button').last().click();
+		await page.waitForFunction((old) => document.querySelector('[data-testid="session-item"]')?.getAttribute('data-card-id') !== String(old), id);
+	}
+	for (const [k, drill] of session.drills.entries()) {
+		await page.getByTestId('drill').waitFor();
+		if (k === 0 && shot) await shot('session-drill');
+		await page.getByLabel('Câu đã sửa').fill(drill.corrected);
+		await page.getByTestId('drill').getByRole('button', { name: 'Kiểm tra' }).click();
+		await page.getByTestId('drill-feedback').getByRole('button').click();
+		await page.waitForFunction((old) => document.querySelector('[data-testid="drill"]')?.getAttribute('data-cache-id') !== String(old), drill.cacheId);
+	}
+}
+
+/** Đọc: the passage with a glossary popover, a question with its feedback, the end screen. */
+async function readSession(page: Page, shot: Shot) {
+	const session = (await openSession(page, 'budget=4&shape=read')) as Started;
+	await playCardsAndDrills(page, session, shot);
+	const anchor = session.anchor as Extract<Anchor, { type: 'reading' }>;
+	if (anchor.glossary.length > 0) await page.getByTestId('passage').getByRole('button', { name: anchor.glossary[0].word }).click();
+	await shot('session-reading', true);
+	await page.getByRole('button', { name: 'Trả lời câu hỏi' }).click();
+	for (const [k, q] of anchor.questions.entries()) {
+		await page.getByTestId('reading').getByRole('button', { name: q.options[k === 0 ? q.answerIndex : (q.answerIndex + 1) % 4], exact: true }).click();
+		await page.getByTestId('reading-feedback').waitFor();
+		if (k === 0) await shot('session-reading-question');
+		await page.getByTestId('reading-feedback').getByRole('button').click();
+	}
+	await page.getByTestId('session-done').waitFor();
+	await shot('session-done-read');
+}
+
+/** Viết sessions until both a writing and a translation feedback are photographed. */
+async function writeSessions(page: Page, shot: Shot) {
+	const taken = new Set<string>();
+	while (taken.size < 2) {
+		const session = (await openSession(page, 'budget=4&shape=write')) as Started;
+		await playCardsAndDrills(page, session, null);
+		const anchor = session.anchor!;
+		const text =
+			anchor.type === 'writing'
+				? 'Last Sunday I went to the market with my mother. We buyed some fish and vegetables, and then we cooked dinner together.'
+				: `In other words: ${(anchor as Extract<Anchor, { type: 'translation' }>).referenceEn}`;
+		await page.getByLabel(anchor.type === 'writing' ? 'Bài viết của bạn (bằng tiếng Anh)' : 'Bản dịch của bạn (bằng tiếng Anh)').fill(text);
+		await page.getByRole('button', { name: 'Nộp bài' }).click();
+		await page.getByTestId('feedback-card').waitFor();
+		if (!taken.has(anchor.type)) await shot(`session-${anchor.type}-feedback`, true);
+		taken.add(anchor.type);
+		await page.getByTestId('writing').getByRole('button').last().click();
+		await page.getByTestId('session-done').waitFor();
+	}
+}
+
+/** Feedback at session start: a writing graded after its session (the canned grader fails it first). */
+async function feedbackAtStart(page: Page, shot: Shot, theme: string) {
+	for (;;) {
+		const session = (await openSession(page, 'budget=4&shape=write')) as Started;
+		await playCardsAndDrills(page, session, null);
+		if (session.anchor?.type === 'writing') {
+			await page.getByLabel('Bài viết của bạn (bằng tiếng Anh)').fill(`GRADELATER (${theme}) My childs like to play football after school every day.`);
+			await page.getByRole('button', { name: 'Nộp bài' }).click();
+			await page.getByTestId('anchor-queued').waitFor();
+		}
+		await page.getByTestId('writing').getByRole('button').last().click();
+		await page.getByTestId('session-done').waitFor();
+		if (session.anchor?.type === 'writing') break;
+	}
+	const db = createDb(`${OUT}/app.db`);
+	// This process's canned grader also fails the marked text once: grade until nothing is queued.
+	for (let i = 0; i < 3; i++) {
+		const run = await gradeQueuedWritings({ maxCalls: 5 }, { llm: appLlmDeps(db, { LLM_CANNED: '1' }), dailyCap: 100_000 });
+		if (run.remaining === 0) break;
+	}
+	db.$client.close();
+	await openSession(page, 'budget=5&shape=quick');
+	await page.getByTestId('session-feedback').waitFor();
+	await shot('session-feedback-start', true);
+	await page.getByRole('button', { name: 'Đã xem' }).click();
+}
+
 await waitForServer();
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 const files: string[] = [];
@@ -170,11 +277,19 @@ for (const theme of ['light', 'dark'] as const) {
 	}
 	await page.goto(`${origin}/dev/components`);
 	await shot('components', true);
-	contexts.push({ page, shot });
+	contexts.push({ page, shot, theme });
 }
 // Then the placement test in each theme; the second run's result shows the comparison.
 for (const [i, { page, shot }] of contexts.entries()) await placement(page, shot, i > 0);
 for (const { page, shot } of contexts) await session(page, shot);
+for (const { page, shot, theme } of contexts) {
+	await readSession(page, shot);
+	await writeSessions(page, shot);
+	await feedbackAtStart(page, shot, theme);
+	await page.goto(`${origin}/`);
+	await page.waitForLoadState('networkidle');
+	await shot('home-shape');
+}
 await browser.close();
 stop();
 for (const file of files) console.log(file);

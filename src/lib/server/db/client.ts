@@ -34,10 +34,26 @@ export function createDb(path: string): Db {
 	return drizzle(sqlite, { schema });
 }
 
-/** Apply pending migrations. Already-applied migrations are skipped, so this is safe to repeat. */
+/**
+ * Apply pending migrations. Already-applied migrations are skipped, so this is safe to repeat.
+ *
+ * Foreign keys are off while migrations run (from 0008 on): drizzle's migrator wraps every
+ * migration in one transaction, where the `PRAGMA foreign_keys=OFF` lines drizzle-kit emits are
+ * no-ops, so a table rebuild (needed to change a CHECK) could not drop a table that others
+ * reference (ON DELETE RESTRICT fails, SET NULL silently nulls the links). Afterwards
+ * `foreign_key_check` must come back empty, or this throws and the server refuses to start.
+ */
 export function migrate(db: Db, folder = migrationsFolder()): void {
 	if (!existsSync(folder)) throw new Error(`Migrations folder not found: ${folder}`);
-	drizzleMigrate(db, { migrationsFolder: folder });
+	const enforced = db.$client.pragma('foreign_keys', { simple: true }) === 1;
+	db.$client.pragma('foreign_keys = OFF');
+	try {
+		drizzleMigrate(db, { migrationsFolder: folder });
+	} finally {
+		if (enforced) db.$client.pragma('foreign_keys = ON');
+	}
+	const violations = db.$client.pragma('foreign_key_check') as unknown[];
+	if (violations.length > 0) throw new Error(`Foreign key check failed after migrating: ${JSON.stringify(violations.slice(0, 5))}`);
 }
 
 let instance: Db | undefined;

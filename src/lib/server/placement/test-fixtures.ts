@@ -28,7 +28,7 @@ export const CONTENT: PlacementContent = {
 };
 
 type GapType = (typeof CLOZE_GAP_TYPES)[number];
-const GAPS: Record<GapType, { text: string; index: number; answer: string; options: string[] }> = {
+const GAPS: Record<Exclude<GapType, 'user_error'>, { text: string; index: number; answer: string; options: string[] }> = {
 	// tokens: I(0) like(1) the(2) cat(3) .(4)
 	lexical: { text: 'I like the cat number', index: 1, answer: 'like', options: ['eat', 'like', 'sit', 'run'] },
 	article: { text: 'I like the cat number', index: 2, answer: 'the', options: ['a', 'an', 'the', '—'] },
@@ -43,7 +43,7 @@ export function seedClozePool(db: DbOrTx, bands: readonly number[], perBand: num
 	const sentences = sentencesRepo(db);
 	const items = clozeItemsRepo(db);
 	const ids: number[] = [];
-	const types = Object.keys(GAPS) as GapType[];
+	const types = Object.keys(GAPS) as (keyof typeof GAPS)[];
 	let n = 0;
 	const base = (seeded += 10_000);
 	for (const band of bands) {
