@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as prompt from '../../llm/prompts/cloze-critic.ts';
 import type { Label, Verdict } from '../../llm/prompts/cloze-critic.ts';
 import { NO_WORD } from '../tokens.ts';
 import { criticSentences, judge } from './critic.ts';
@@ -68,5 +69,19 @@ describe('criticSentences', () => {
 	it('removes a mid-sentence gap cleanly for "no word"', () => {
 		const [, none] = criticSentences({ contentHash: 'h', enText: 'I saw a dog there.', tokenIndex: 2, answer: 'a', options: ['a', NO_WORD, 'the', 'an'] });
 		expect(none.text).toBe('I saw dog there.');
+	});
+});
+
+describe('another_could_be_correct (Phase 11)', () => {
+	it('rejects an otherwise clean item when the critic says another option could also be correct', () => {
+		const verdicts = [verdict('A', false), verdict('B', false), verdict('C', true), verdict('D', false)];
+		expect(judge('C', verdicts, true)).toMatchObject({ ok: false, reason: 'critic:another_could_be_correct' });
+		expect(judge('C', verdicts, false)).toMatchObject({ ok: true, reason: null });
+	});
+
+	it('the prompt asks for it and accepts articles clearly right in context', () => {
+		expect(prompt.system).toContain('another_could_be_correct');
+		expect(prompt.system).toMatch(/Articles .*other options are clearly wrong here/s);
+		expect(prompt.Response.safeParse({ items: [{ n: 1, sentences: [] }] }).success).toBe(false);
 	});
 });

@@ -1,4 +1,4 @@
-// Error mining: every graded error (writing or translation, at most 3 per submission) becomes a
+// Error mining: every graded error (writing or translation, all of them, not only the 3 shown) becomes a
 // cloze card on the learner's own corrected sentence, so reviews target real mistakes.
 // See docs/architecture.md Part I §8 and plans/phase-09b.md.
 import type { DbOrTx } from '../db/client.ts';
@@ -9,6 +9,7 @@ import { lexemesRepo } from '../db/repositories/lexemes.ts';
 import { sentencesRepo } from '../db/repositories/sentences.ts';
 import type { WritingError } from '../db/schema.ts';
 import { prepositionDistractors } from '../generation/cloze/prepositions.ts';
+import { MAX_RETURNED_ERRORS } from '../llm/prompts/feedback.ts';
 import { type FormIndex, buildFormIndex } from '../generation/forms.ts';
 import { seededShuffle, sha256 } from '../generation/random.ts';
 import { NO_WORD, capitalize, firstWordIndex, tokenize } from '../generation/tokens.ts';
@@ -16,7 +17,8 @@ import { newCardFields } from '../srs/mapping.ts';
 
 /** A correction longer than this (tokens) is not a cloze gap. */
 export const MAX_GAP_TOKENS = 4;
-export const MAX_MINED_PER_SUBMISSION = 3;
+/** Every error a grading returned is mined (the learner is shown only 3: selectShownErrors). */
+export const MAX_MINED_PER_SUBMISSION = MAX_RETURNED_ERRORS;
 /** Codes with a confusion or form table to draw distractors from (the rest are typed). */
 const TABLE_CODES = new Set(['ART', 'PRE', 'SVA', 'TNS', 'PLU']);
 const ARTICLES = ['a', 'an', 'the'];

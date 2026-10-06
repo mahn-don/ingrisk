@@ -33,6 +33,8 @@ export const t = {
 	home: {
 		title: 'Hôm nay',
 		greeting: 'Xin chào! Hôm nay mình học một chút nhé.',
+		noProvider: 'Chưa có nhà cung cấp AI đang dùng: buổi Viết và việc chấm bài tạm thời chưa có. Ôn thẻ và Đọc vẫn dùng được.',
+		noProviderLink: 'Chọn nhà cung cấp AI',
 		todayTitle: 'Hôm nay của bạn',
 		todayStreak: 'ngày liên tiếp',
 		todayFreezes: 'Lượt giữ chuỗi: {n}',
@@ -267,6 +269,7 @@ export const t = {
 			deleted: 'Đã xóa nhà cung cấp.',
 			nameTaken: 'Tên này đã có. Hãy chọn tên khác.',
 			notFound: 'Không tìm thấy nhà cung cấp này.',
+			gone: 'Nhà cung cấp này không còn nữa (có thể đã bị xóa ở nơi khác). Danh sách đã được tải lại.',
 			fieldErrors: {
 				name: 'Tên cần từ 1 đến 40 ký tự.',
 				baseUrl: 'Địa chỉ phải dùng https (http chỉ cho localhost hoặc 127.0.0.1).',
@@ -369,6 +372,8 @@ export const t = {
 			yours: 'Bài của bạn',
 			corrected: 'Bản đã sửa',
 			errors: 'Lỗi chính',
+			repeated: 'lặp lại {n} lần',
+			moreErrors: 'Bài còn {n} lỗi khác (cùng loại hoặc nhỏ hơn).',
 			noErrors: 'Không có lỗi đáng kể. Tốt lắm!',
 			offTopic: 'Bài chưa đúng chủ đề',
 			level: 'Trình độ của bài: {cefr}',
@@ -511,6 +516,11 @@ export const t = {
 		incorrect: 'Sai',
 		selected: 'Đã chọn',
 		progress: 'Tiến độ'
+	},
+	errors: {
+		rateLimited: 'Bạn đã dùng tính năng AI {max} lần trong một giờ, đó là giới hạn. Hãy thử lại sau khoảng {minutes} phút.',
+		llmDown: 'Dịch vụ AI đang không phản hồi. Bài của bạn đã được lưu và sẽ được chấm sau.',
+		noProvider: 'Chưa có nhà cung cấp AI nào đang dùng, nên chưa chấm bài được. Có thể chọn trong Cài đặt → Nhà cung cấp AI.'
 	},
 	errorPage: {
 		notFound: 'Không tìm thấy trang này.',

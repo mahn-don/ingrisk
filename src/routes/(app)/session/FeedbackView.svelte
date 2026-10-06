@@ -49,12 +49,15 @@
 				<ul class="flex flex-col gap-2">
 					{#each card.errors as error, i (i)}
 						<li class="rounded-xl bg-surface-2 px-3 py-2">
-							<p class="text-sm font-semibold">{error.topicNameVi}</p>
+							<p class="text-sm font-semibold">
+								{error.topicNameVi}{#if error.repeats > 1}<span class="font-normal text-muted" data-testid="error-repeats"> · {fill(m.repeated, { n: error.repeats })}</span>{/if}
+							</p>
 							<p class="font-reading" lang="en"><s>{error.original}</s> → <strong>{error.correction}</strong></p>
 							<p class="text-sm">{error.explanationVi}</p>
 						</li>
 					{/each}
 				</ul>
+				{#if card.totalErrors > card.errors.length}<p class="mt-1 text-xs text-muted">{fill(m.moreErrors, { n: card.totalErrors - card.errors.length })}</p>{/if}
 			{/if}
 		</div>
 		{#if card.taskKind === 'translation'}

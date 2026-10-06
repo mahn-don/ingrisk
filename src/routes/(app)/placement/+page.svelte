@@ -61,6 +61,10 @@
 				error = t.placement.stale;
 				return null;
 			}
+			if (response.status === 429) {
+				error = ((await response.json()) as { message: string }).message;
+				return null;
+			}
 			if (!response.ok) throw new Error(String(response.status));
 			return await response.json();
 		} catch {

@@ -17,7 +17,7 @@
 
 	let text = $state('');
 	let busy = $state(false);
-	let error = $state(false);
+	let error = $state<string | null>(null);
 	let result = $state<AnchorResponse | null>(null);
 	const words = $derived(countWords(text));
 
@@ -25,18 +25,22 @@
 		event.preventDefault();
 		if (busy || words === 0) return;
 		busy = true;
-		error = false;
+		error = null;
 		try {
 			const response = await fetch('/api/session/anchor', {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ sessionId, text })
 			});
+			if (response.status === 429) {
+				error = ((await response.json()) as { message: string }).message;
+				return;
+			}
 			if (!response.ok) throw new Error(String(response.status));
 			result = (await response.json()) as AnchorResponse;
 			submitted = true;
 		} catch {
-			error = true;
+			error = m.error;
 		} finally {
 			busy = false;
 		}
@@ -72,7 +76,7 @@
 					· {fill(m.target, { min: anchor.minWords, max: anchor.maxWords })}
 				</p>
 			{/if}
-			{#if error}<p role="alert" class="text-sm text-incorrect">{m.error}</p>{/if}
+			{#if error}<p role="alert" class="text-sm text-incorrect" data-testid="writing-error">{error}</p>{/if}
 			<div class="mt-auto flex flex-col gap-2 pt-4">
 				{#if busy}<p class="text-center text-sm text-muted" aria-live="polite">{m.grading}</p>{/if}
 				<Button type="submit" variant="primary" full loading={busy} disabled={words === 0}>{m.submit}</Button>
@@ -81,7 +85,9 @@
 		</form>
 	{:else}
 		{#if result.queued}
-			<p class="rounded-xl bg-surface-2 px-3 py-2" data-testid="anchor-queued">{m.queued}</p>
+			<p class="rounded-xl bg-surface-2 px-3 py-2" data-testid="anchor-queued" data-reason={result.reason}>
+				{result.reason === 'no_provider' ? t.errors.noProvider : result.reason === 'llm_error' ? t.errors.llmDown : m.queued}
+			</p>
 		{:else}
 			<FeedbackView card={result.feedback} />
 		{/if}

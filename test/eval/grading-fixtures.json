@@ -1,5 +1,5 @@
 {
-	"description": "Fixtures for npm run eval:grading: 8 answers with known Vietnamese-learner errors (expected_codes), 2 correct translations that differ from the reference (must get zero errors and meaning_ok true), and 2 writing samples (one weak, one strong) and 1 off-topic writing sample (expected_on_topic false: its CEFR must not count).",
+	"description": "Fixtures for npm run eval:grading: 8 answers with known Vietnamese-learner errors (expected_codes), 2 correct translations that differ from the reference (must get zero errors and meaning_ok true), and 2 writing samples (one weak, one strong) and 1 off-topic writing sample (expected_on_topic false: its CEFR must not count). Phase 11: 2 texts with a repeated code plus others (expected_shown_codes: the 3 errors shown must cover the distinct codes, e.g. COP is not crowded out by a second SVA).",
 	"items": [
 		{
 			"id": "tns-art",
@@ -149,6 +149,43 @@
 			"expected_codes": [],
 			"expected_on_topic": false,
 			"note": "Correct English that ignores the task (meals): on_topic must be false, with a Vietnamese task note."
+		},
+		{
+			"id": "sva-sva-art-cop",
+			"type": "writing",
+			"level_band": 2,
+			"prompt_vi": "Giới thiệu các thành viên trong gia đình bạn: họ là ai và họ làm gì?",
+			"user_text": "My sister go to school every day. She like music very much. We have cat at home. She very happy with it.",
+			"expected_codes": [
+				"SVA",
+				"ART",
+				"COP"
+			],
+			"expected_shown_codes": [
+				"SVA",
+				"ART",
+				"COP"
+			],
+			"note": "Two subject-verb agreement slips, a missing article and a missing 'is': the 3 shown must be SVA, ART and COP, with SVA repeated twice."
+		},
+		{
+			"id": "tns-plu-pre",
+			"type": "translation",
+			"level_band": 2,
+			"vi": "Hôm qua tôi mua hai quyển sách và đọc chúng vào buổi tối.",
+			"reference_en": "Yesterday I bought two books and read them in the evening.",
+			"user_en": "Yesterday I buy two book and read them on the evening.",
+			"expected_codes": [
+				"TNS",
+				"PLU",
+				"PRE"
+			],
+			"expected_shown_codes": [
+				"TNS",
+				"PLU",
+				"PRE"
+			],
+			"note": "Present for past (buy), a missing plural and the wrong preposition: three different codes must be shown."
 		}
 	]
 }

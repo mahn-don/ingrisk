@@ -74,6 +74,8 @@ export interface FeedbackError {
 	topicCode: TopicCode;
 	topicNameVi: string;
 	explanationVi: string;
+	/** Errors of this code in the text (2+: shown as "lặp lại N lần"). */
+	repeats: number;
 }
 
 /** Graded writing the learner has not seen yet, or the feedback of the anchor just submitted. */
@@ -86,7 +88,10 @@ export interface FeedbackCard {
 	userText: string;
 	/** Null in indirect feedback mode (the learner corrects it). */
 	correctedText: string | null;
+	/** At most 3, distinct error codes first. */
 	errors: FeedbackError[];
+	/** Every error the grading found (all mined into cards). */
+	totalErrors: number;
 	cefr: string | null;
 	onTopic: boolean | null;
 	taskNoteVi: string | null;
@@ -114,7 +119,9 @@ export type StartResponse =
 	| { sessionId: null; startedAt: number; shape: SessionShape; items: []; drills: []; anchor: null; feedback: FeedbackCard[]; reason: EmptyReason };
 
 /** POST /api/session/anchor: graded feedback, or queued when grading did not finish in time. */
-export type AnchorResponse = { queued: false; feedback: FeedbackCard } | { queued: true };
+/** Why a writing waits for grading: no active provider, the provider failed, or it took over 30 s. */
+export type QueuedReason = 'no_provider' | 'llm_error' | 'timeout' | 'pending';
+export type AnchorResponse = { queued: false; feedback: FeedbackCard } | { queued: true; reason: QueuedReason };
 
 export interface SessionResult {
 	cardId: number;

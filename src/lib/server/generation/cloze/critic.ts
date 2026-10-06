@@ -33,10 +33,11 @@ export function criticSentences(input: CriticInput): prompt.CriticItem['sentence
 export const isAcceptable = (v: prompt.Verdict) => v.grammatical && v.natural && v.meaning_ok;
 
 /**
- * Accept only if exactly one filled sentence is acceptable and it is the intended answer.
+ * Accept only if exactly one filled sentence is acceptable, it is the intended answer, and the
+ * critic does not think another option could also be correct (Phase 11).
  * Returns null if the verdicts do not cover A-D exactly once (a malformed answer, not a judgement).
  */
-export function judge(answerLabel: prompt.Label, verdicts: readonly prompt.Verdict[]): Judgement | null {
+export function judge(answerLabel: prompt.Label, verdicts: readonly prompt.Verdict[], anotherCouldBeCorrect = false): Judgement | null {
 	const labels = verdicts.map((v) => v.label);
 	if (labels.length !== 4 || prompt.LABELS.some((l) => !labels.includes(l))) return null;
 	const acceptable = prompt.LABELS.filter((l) => isAcceptable(verdicts.find((v) => v.label === l)!));
@@ -45,6 +46,7 @@ export function judge(answerLabel: prompt.Label, verdicts: readonly prompt.Verdi
 	if (acceptable.length === 0) reason = 'critic:none_acceptable';
 	else if (acceptable.length > 1) reason = `critic:several_acceptable (${acceptable.join(', ')})`;
 	else if (acceptable[0] !== answerLabel) reason = `critic:other_option_acceptable (${acceptable[0]}, answer ${answerLabel})`;
+	else if (anotherCouldBeCorrect) reason = 'critic:another_could_be_correct';
 	return { ok: reason === null, acceptable, reason, notes };
 }
 
@@ -78,8 +80,8 @@ export async function runCritic(
 			const byN = new Map(response.data.items.map((item) => [item.n, item]));
 			batch.forEach((item, i) => {
 				const answerIndex = item.options.indexOf(item.answer);
-				const verdicts = byN.get(i + 1)?.sentences;
-				const judgement = verdicts === undefined || answerIndex < 0 ? null : judge(prompt.LABELS[answerIndex], verdicts);
+				const answered = byN.get(i + 1);
+				const judgement = answered === undefined || answerIndex < 0 ? null : judge(prompt.LABELS[answerIndex], answered.sentences, answered.another_could_be_correct);
 				if (judgement === null) missing.push(item);
 				else options.onJudged(item, judgement, response.model);
 			});

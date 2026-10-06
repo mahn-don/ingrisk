@@ -471,7 +471,7 @@ Generation is batch and ahead of time, never during a session. Every prompt modu
 
 1. **Candidates** (`generation/cloze/candidates.ts`, deterministic). Eligible sentences: not blocked, 4–15 words, `off_list_count` ≤ 2. At most one lexical and one grammar candidate per sentence.
    - *lexical*: a content word whose lemma is in NGSL and not in the function-word stoplist (`stoplist.ts`); never a capitalized word mid-sentence, never part of a hyphenated compound; the highest band ≤ sentence band + 1 wins. Item band = max(sentence band, lemma band); `lexeme_id` is linked.
-   - *article* (ART): options `a, an, the, —`.
+   - *article* (ART): options `a, an, the, —`, only where a rule fixes the answer (Phase 11: `the` + superlative/ordinal/unique noun; `a/an` after "there is", such/what, "a lot of", "twice a week").
    - *preposition* (PRE): distractors from a fixed confusion table (`prepositions.ts`); the infinitive "to" is not a preposition.
    - *verb_form*: a lemma with at least four real forms (one in -ing); options are other forms of the same lemma that occur in the sentence corpus and are real words (NGSL form lists include nonstandard forms such as "makeing"). No modals, no noun uses after a determiner. Topic SVA when the gap is present simple after a third-person subject, else TNS.
    - Selection is seeded and stable: candidates are bucketed by (gap type, band), each bucket ordered by content hash, and taken round-robin, so a run spreads across types and bands.
@@ -955,18 +955,15 @@ Built after Phase 10 (the owner's build order). No reverse proxy and no TLS (Par
 
 #### Phase 11 — Hardening
 
-> Final pass. Add the eval fixture set in `test/eval/` (30 items, 10 writing samples) with a harness re-run after any prompt change. Add error, empty and offline states on every screen. Add migration tests from each prior schema version. Ensure the app does not crash when the cache is empty, a provider is misconfigured, or the network fails mid-session.
->
-> Add rate limiting on every route that calls the LLM — 60 requests per hour is ample for one user.
->
-> Run `npm run check`, `npm run lint` and the full test suite; fix everything.
->
-> Then use a review subagent with this bounded question: "Compare the implementation against `docs/architecture.md` and `plans/roadmap.md`. Report only correctness defects and unmet stated requirements. Do not report style preferences, do not suggest architectural changes, and do not propose new features."
->
-> Address only confirmed correctness gaps.
+> Final pass: error, empty and offline states on every screen; migration tests from each prior schema version; eval fixtures; a rate limit of 60 requests per hour on every route that calls the LLM; `npm run check`, lint and the full test suite green.
 
-**Result:** a stable v1.
-**Check:** tests green, a week of real use without errors, and one more backup restore.
+**As built** (`plans/phase-11.md`), together with the quality fixes found in use:
+- **Stale providers:** a provider id that no longer exists gives a toast and a reloaded list.
+- **Grading:** the model returns every error, all of them are mined, and the learner sees 3 with distinct codes first plus a repeat count.
+- **Reading coverage:** an everyday-word allowlist for bands ≤ 4, the band's word list in the prompt, and one rewrite.
+- **Cloze:** article gaps only where a rule fixes the answer, and a critic check that no other option could also be correct.
+- **Content filter:** the blocklist now matches phrases and covers death, drinking and self-harm.
+- **Hardening:** a 60/hour in-memory limit on LLM routes; queued writing says why it is queued; a no-provider notice on Home; a test that migrates a database from every earlier version.
 
 ---
 

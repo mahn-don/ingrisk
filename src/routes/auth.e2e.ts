@@ -60,6 +60,8 @@ test.describe('login and logout', () => {
 		await expect(page.getByRole('heading', { name: 'Tiến độ', level: 1 })).toBeVisible();
 		await page.getByRole('link', { name: 'Hôm nay' }).click();
 		await expect(page.getByTestId('count-due')).toHaveText('0');
+		// No provider on this server: Home says why Viết and grading are unavailable.
+		await expect(page.getByTestId('no-provider')).toContainText('Chưa có nhà cung cấp AI');
 		await expect(page.getByTestId('count-new')).toHaveText('0');
 		await expect(page.getByRole('link', { name: 'Bắt đầu học' })).toHaveAttribute('href', '/session?budget=8&shape=quick');
 	});

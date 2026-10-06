@@ -3,7 +3,7 @@
 // Bump PROMPT_VERSION whenever the wording or schema changes; it is stored with every item.
 import { z } from 'zod';
 
-export const PROMPT_VERSION = 'cloze-critic@1';
+export const PROMPT_VERSION = 'cloze-critic@2';
 export const PURPOSE = 'cloze_critic';
 
 export const LABELS = ['A', 'B', 'C', 'D'] as const;
@@ -17,7 +17,13 @@ Each item is one English sentence written four ways (A, B, C, D); only one word 
 - meaning_ok: is the meaning coherent and plausible?
 - note: one short line explaining your judgement.
 
-Be strict and honest. Do not try to find a single winner: if two or more versions are fully acceptable, mark all of them acceptable; if none is, mark none. Return the items in the order given, with the same n, and all four labels for each item.`;
+Be strict and honest. Do not try to find a single winner: if two or more versions are fully acceptable, mark all of them acceptable; if none is, mark none.
+
+Articles (a / an / the / no word): judge each version in the context of this sentence as written, as a careful teacher would. Accept a version when it is right here and the other options are clearly wrong here (e.g. "the" before a superlative or "first", "a" after "there is"); do not accept a version only because some other context, not this sentence, could make it work.
+
+Finally, for each item answer one question, another_could_be_correct: reading the sentence as written, could more than one version reasonably be called correct (true), or is every version but one clearly wrong (false)? An exercise with two correct answers confuses learners.
+
+Return the items in the order given, with the same n, all four labels for each item, and another_could_be_correct.`;
 
 export interface CriticItem {
 	n: number;
@@ -41,7 +47,8 @@ export const Response = z.object({
 	items: z.array(
 		z.object({
 			n: z.number().int(),
-			sentences: z.array(Verdict).length(4).describe('One verdict per label A-D')
+			sentences: z.array(Verdict).length(4).describe('One verdict per label A-D'),
+			another_could_be_correct: z.boolean().describe('More than one version could reasonably be called correct')
 		})
 	)
 });

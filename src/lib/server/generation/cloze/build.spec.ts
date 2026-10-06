@@ -95,8 +95,9 @@ describe('buildCloze', () => {
 		const repo = clozeItemsRepo(fx.db);
 		const validated = repo.byValidated(true);
 		const rejected = repo.byValidated(false);
-		expect(summary.stored).toBeGreaterThan(20);
-		expect(validated.length).toBeGreaterThan(20);
+		// Article gaps only where a rule fixes the answer (Phase 11), so fewer items than before.
+		expect(summary.stored).toBeGreaterThan(15);
+		expect(validated.length).toBeGreaterThan(15);
 		expect(validated.length + rejected.length).toBe(summary.stored);
 		// The fixture's template sentences make some noun distractors fit too: the critic catches them.
 		for (const item of rejected) expect(item).toMatchObject({ ruleOk: true, criticOk: false });

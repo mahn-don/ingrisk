@@ -228,7 +228,7 @@ describe('the Viết anchor', () => {
 		const { db, s } = writeSession();
 		let release: (g: GradedWriting) => void = () => {};
 		const late = new Promise<GradedWriting>((resolve) => (release = resolve));
-		expect(await submitAnchor(deps(db, () => late, 10), { sessionId: s.sessionId, text: 'We buyed fish.' })).toEqual({ queued: true });
+		expect(await submitAnchor(deps(db, () => late, 10), { sessionId: s.sessionId, text: 'We buyed fish.' })).toEqual({ queued: true, reason: 'timeout' });
 		expect(finishSession(db, at(2 * MINUTE), { sessionId: s.sessionId, clientSessionId: 'q', results: [], anchor: { type: 'writing' } })).toMatchObject({
 			anchor: { status: 'queued' },
 			minedErrors: 0
@@ -245,8 +245,17 @@ describe('the Viết anchor', () => {
 
 	it('no provider: stored and queued without trying', async () => {
 		const { db, s } = writeSession();
-		expect(await submitAnchor(deps(db, null), { sessionId: s.sessionId, text: 'Hello there.' })).toEqual({ queued: true });
+		expect(await submitAnchor(deps(db, null), { sessionId: s.sessionId, text: 'Hello there.' })).toEqual({ queued: true, reason: 'no_provider' });
 		expect(writingRepo(db).queued()).toHaveLength(1);
+	});
+
+	it('the LLM fails: stored, queued, and the reason says so (the learner sees "AI is down")', async () => {
+		const { db, s } = writeSession();
+		const failing = () => Promise.reject(new Error('503 from provider'));
+		expect(await submitAnchor(deps(db, failing), { sessionId: s.sessionId, text: 'Hello there.' })).toEqual({ queued: true, reason: 'llm_error' });
+		expect(writingRepo(db).queued()).toHaveLength(1);
+		// A repeated submit says it is still pending.
+		expect(await submitAnchor(deps(db, failing), { sessionId: s.sessionId, text: 'Hello there.' })).toEqual({ queued: true, reason: 'pending' });
 	});
 
 	it('refuses a writing for a session without one, and an empty text', async () => {
@@ -300,6 +309,33 @@ describe('feedback surfacing', () => {
 		applyWritingGrade(db, other.id, graded({ errors: [] }), T0);
 		settingsRepo(db).update({ feedbackMode: 'indirect' });
 		expect(startSession(db, at(4 * MINUTE), { budgetMin: 5 }).feedback[0].correctedText).toBeNull();
+	});
+});
+
+describe('graded errors: 3 shown (distinct codes first), every one mined', () => {
+	it('SVA, SVA, ART, COP shows SVA (×2), ART and COP, and mines all four', () => {
+		const { db, addItem } = setup();
+		addItem();
+		const text = 'My sister go to school. She like music. We have cat. She very happy.';
+		const submission = writingRepo(db).queue({ sessionId: null, prompt: 'Viết về gia đình.', userText: text, submittedAt: T0 });
+		const e = (original: string, correction: string, topic_code: 'SVA' | 'ART' | 'COP') => ({ original, correction, topic_code, explanation_vi: 'Giải thích.' });
+		applyWritingGrade(
+			db,
+			submission.id,
+			graded({
+				correctedText: 'My sister goes to school. She likes music. We have a cat. She is very happy.',
+				errors: [e('go', 'goes', 'SVA'), e('like', 'likes', 'SVA'), e('have cat', 'have a cat', 'ART'), e('She very', 'She is very', 'COP')]
+			}),
+			T0
+		);
+		const card = startSession(db, at(MINUTE), { budgetMin: 5 }).feedback[0];
+		expect(card.errors.map((x) => [x.topicCode, x.repeats])).toEqual([
+			['SVA', 2],
+			['ART', 1],
+			['COP', 1]
+		]);
+		expect(card.totalErrors).toBe(4);
+		expect(card.mined).toBe(4);
 	});
 });
 

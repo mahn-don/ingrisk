@@ -1,5 +1,6 @@
-// Graded reading passages (kind 'reading' in generated_cache): one passage per LLM call, rules
-// (length, coverage, glossary, options, blocklist), then the blind critic. See plans/phase-05b.md.
+// Graded reading passages (kind 'reading' in generated_cache): one passage per LLM call (the
+// band's allowed words in the prompt), rules (length, coverage, glossary, options, blocklist) with
+// one rewrite when only coverage fails, then the blind critic. See plans/phase-05b.md, phase-11.md.
 import { cacheRepo } from '../../db/repositories/cache.ts';
 import { type LlmDeps, generateStructured } from '../../llm/client.ts';
 import * as criticPrompt from '../../llm/prompts/reading-critic.ts';
@@ -9,7 +10,7 @@ import type { BlocklistMatcher } from '../blocklist.ts';
 import type { FormIndex } from '../forms.ts';
 import { hashString, seededShuffle, sha256 } from '../random.ts';
 import { type GenSummary, countAdded, countIn, emptySummary, paramsHash, reasonCode } from '../summary.ts';
-import { coverage, STOCK_NAMES, wordCount } from './coverage.ts';
+import { allowedWords, coverage, STOCK_NAMES, wordCount } from './coverage.ts';
 import { judgeReading } from './critic.ts';
 import { checkPassage, readingRuleReason, wordRange } from './rules.ts';
 import { TOPICS } from './topics.ts';
@@ -107,18 +108,29 @@ export async function buildReading(
 		async ([job]) => {
 			const [min, max] = wordRange(job.band);
 			const topic = TOPICS.find((t) => t.id === job.topic)!;
-			const response = await generateStructured(
-				{
-					purpose: passagePrompt.PURPOSE,
-					system: passagePrompt.system,
-					user: passagePrompt.buildUser({ level_band: job.band, topic: topic.en, min_words: min, max_words: max, names: [...STOCK_NAMES] }),
-					schema: passagePrompt.Response,
-					maxTokens: 2500,
-					providerId: options.providerId,
-					fallback: options.providerId === undefined
-				},
-				deps.llm
-			);
+			const brief = { level_band: job.band, topic: topic.en, min_words: min, max_words: max, names: [...STOCK_NAMES], allowed_words: allowedWords(job.band, deps.forms) };
+			const call = (user: string) =>
+				generateStructured(
+					{
+						purpose: passagePrompt.PURPOSE,
+						system: passagePrompt.system,
+						user,
+						schema: passagePrompt.Response,
+						maxTokens: 2500,
+						providerId: options.providerId,
+						fallback: options.providerId === undefined
+					},
+					deps.llm
+				);
+			let response = await call(passagePrompt.buildUser(brief));
+			let rules = checkPassage(response.data, job.band, deps);
+			// Coverage alone failed: send the words above the level back once, then judge the rewrite.
+			if (!rules.ok && rules.code === 'coverage') {
+				const above = coverage(response.data.passage_en, job.band, deps.forms).uncovered;
+				countIn(summary.rejected, 'reading:coverage_retry');
+				response = await call(passagePrompt.buildRewriteUser(brief, response.data, above));
+				rules = checkPassage(response.data, job.band, deps);
+			}
 			const hash = sha256(`reading|${response.data.passage_en.replace(/\s+/g, ' ').trim()}`);
 			if (cache.existingHashes([hash]).size > 0) return;
 			const passage = shuffleQuestions(response.data, String(hashString(hash)));
@@ -129,7 +141,6 @@ export async function buildReading(
 				coverage: Number(coverage(passage.passage_en, job.band, deps.forms).ratio.toFixed(3))
 			};
 			const draft: Draft = { payload, band: job.band, hash, model: response.model };
-			const rules = checkPassage(passage, job.band, deps);
 			if (rules.ok) drafts.push(draft);
 			else {
 				const reason = readingRuleReason(rules);

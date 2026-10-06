@@ -25,6 +25,8 @@
 				return m.generateStarted;
 			case 'locked':
 				return m.generateLocked;
+			case 'rate_limited':
+				return 'message' in generateResult ? String(generateResult.message) : m.generateLocked;
 			case 'capped':
 				return fill(m.generateCapped, { used: 'used' in generateResult ? generateResult.used : 0, cap: 'cap' in generateResult ? generateResult.cap : 0 });
 			default:

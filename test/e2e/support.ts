@@ -165,3 +165,15 @@ export function topicsOf(dbPath: string, cardIds: readonly number[]): (string | 
 export function answerOf(dbPath: string, cardId: number): string {
 	return withDb(dbPath, (db) => (db.prepare('select ci.answer from cards c join cloze_items ci on ci.id = c.cloze_item_id where c.id = ?').get(cardId) as { answer: string }).answer);
 }
+
+/** Add a keyless provider row directly in the server's database; returns its id. */
+export function insertProvider(dbPath: string, name: string): number {
+	return withDb(dbPath, (db) =>
+		Number(db.prepare("insert into llm_providers (name, base_url, model, wire_format, structured_mode) values (?, 'https://api.example.com/v1', 'm', 'openai', 'json_schema')").run(name).lastInsertRowid)
+	);
+}
+
+/** Delete a provider row behind the UI's back (another tab, the CLI). */
+export function deleteProviderRow(dbPath: string, id: number): void {
+	withDb(dbPath, (db) => db.prepare('delete from llm_providers where id = ?').run(id));
+}

@@ -3,7 +3,7 @@
 import { FEEDBACK_RULES, RUBRIC, TOPIC_CODE_GUIDE, TranslationFeedback } from './feedback.ts';
 import { describeBand } from './levels.ts';
 
-export const PROMPT_VERSION = 'grade-translation@1';
+export const PROMPT_VERSION = 'grade-translation@2';
 export const PURPOSE = 'grade_translation';
 export const Response = TranslationFeedback;
 
