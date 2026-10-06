@@ -4,7 +4,7 @@
 	"version": "0.0.1",
 	"type": "module",
 	"engines": {
-		"node": ">=22.18"
+		"node": ">=24"
 	},
 	"scripts": {
 		"dev": "vite dev",
@@ -27,6 +27,7 @@
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "node --env-file-if-exists=.env src/lib/server/db/migrate-cli.ts",
 		"db:studio": "drizzle-kit studio",
+		"db:snapshot": "node --env-file-if-exists=.env tool/db-snapshot.ts",
 		"srs:walkthrough": "node tool/srs-walkthrough.ts",
 		"llm:provider:add": "node --env-file-if-exists=.env tool/llm-provider-add.ts",
 		"llm:smoke": "node --env-file-if-exists=.env tool/llm-smoke.ts",

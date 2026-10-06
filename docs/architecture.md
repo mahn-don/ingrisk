@@ -548,7 +548,7 @@ Constraining `topic_code` to the enum is what makes error mining work: free-text
 
 The app is on the public internet, so:
 - **A single password gate.** The password's argon2id hash (`npm run auth:hash`, which prompts twice with hidden input) lives in `APP_PASSWORD_HASH`. Unset or not an argon2id hash means nobody can log in and every page stays closed: it fails closed.
-- **The chokepoint is `handle` in `src/hooks.server.ts`**, not a layout: layout loads do not run for `+server.ts` endpoints, so a layout guard would leave `/api/*` open. Every request (pages, form actions, data requests, endpoints) resolves the session into `event.locals.session` and passes `accessFor()` (`src/lib/server/auth/guard.ts`). Only an explicit allowlist is public (the backup download `/api/backup` is not on it): `/login`, `/api/cron/*` (own secret), `/favicon.svg`, `/robots.txt`, `/_app/immutable/*`, `/_app/version.json`, `/_app/env.js` (not all of `/_app/`: `/_app/remote/*` would be server code). Anything else without a session: pages get 303 to `/login?next=<path>`, `/api/*` gets 401 JSON (503 JSON when login is not configured). `next` must be a same-origin relative path (never `//evil.com`, absolute URLs or backslash tricks), else `/`. `(app)/+layout.server.ts` only exposes session info; it is not a security boundary.
+- **The chokepoint is `handle` in `src/hooks.server.ts`**, not a layout: layout loads do not run for `+server.ts` endpoints, so a layout guard would leave `/api/*` open. Every request (pages, form actions, data requests, endpoints) resolves the session into `event.locals.session` and passes `accessFor()` (`src/lib/server/auth/guard.ts`). Only an explicit allowlist is public (the backup download `/api/backup` is not on it): `/login`, `/healthz` (Phase 7: `{ok, db, migrations}` only, for the deploy scripts), `/api/cron/*` (own secret), `/favicon.svg`, `/robots.txt`, `/_app/immutable/*`, `/_app/version.json`, `/_app/env.js` (not all of `/_app/`: `/_app/remote/*` would be server code). Anything else without a session: pages get 303 to `/login?next=<path>`, `/api/*` gets 401 JSON (503 JSON when login is not configured). `next` must be a same-origin relative path (never `//evil.com`, absolute URLs or backslash tricks), else `/`. `(app)/+layout.server.ts` only exposes session info; it is not a security boundary.
 - **Sessions are server-side** (`auth_sessions(id, created_at, expires_at, last_seen_at)`, migration 0005). The cookie `se_session` holds 32 random bytes (base64url); the table stores only their SHA-256, so a copy of the database cannot log anyone in. 30 days, sliding: on use, `last_seen_at` and the expiry move forward at most once an hour. Logout (a POST action) deletes the row and the cookie; an expired row is deleted when presented.
 - **Cookies:** `httpOnly`, `sameSite=lax`, `path=/`; `secure` from `COOKIE_SECURE` (default true). `false` is allowed for any `ORIGIN`, because the app is served over plain HTTP on an IP (Part 0, Decisions). With `false` and a non-local origin, the server logs a startup warning and the login page shows a small, non-blocking notice: "Kết nối không mã hóa". The theme preference (`system`/`light`/`dark`) is a cookie too, so the server renders `data-theme` on `<html>` and the first paint is right.
 - **`ORIGIN`** must equal the URL in the browser exactly (now `http://103.82.195.48:3000`; `http://localhost:3000` through an SSH tunnel); otherwise SvelteKit's CSRF check rejects the login form with 403. **It is read at build time** (`vite.config.ts` → `paths.origin`): adapter-node 6 (SvelteKit 3) has no runtime `ORIGIN` variable and, without `paths.origin`, assumes `https://<host>`, which over plain HTTP rejects every form POST. Build with `ORIGIN` set and rebuild after changing it.
@@ -561,19 +561,36 @@ The app is on the public internet, so:
 ### 7. Deployment
 
 ```
-Phone browser → http://103.82.195.48:3000 → Node (0.0.0.0:3000, systemd)
+Phone browser → http://103.82.195.48:3000 → Node 24 (0.0.0.0:3000, systemd, from the checkout)
                                               ↓
-                                        data/app.db
-                                              ↓
-                                        Litestream → R2 / B2
+                                        <repo>/data/app.db  →  data/backups/ (nightly + pre-deploy)
+                                                            ⇢  Litestream → R2 / B2 (optional)
 ```
 
-- **VPS:** a small VPS (1 vCPU / 1 GB RAM is ample for one user), close to Vietnam for latency.
-- **No reverse proxy, no TLS for now** (Part 0, Decisions): adapter-node listens on `HOST=0.0.0.0`, `PORT=3000`; the firewall allows only SSH and 3000. HTTPS can be added later in front (Tailscale or a Cloudflare Tunnel) without code changes.
-- **systemd:** `Restart=always`, environment loaded from a `.env` file with mode 600.
-- **Litestream:** continuous replication of the SQLite file to object storage.
-- **Cron:** `crontab` calls the prefetch endpoint at 03:00 Vietnam time.
-- **Deploy:** `git pull && npm ci && npm run build && systemctl restart silentenglish`, wrapped in `deploy/deploy.sh`. The build must see `ORIGIN` (Part II §6), so the script loads `/etc/silentenglish/.env` before `npm run build`.
+As built in Phase 7 (`deploy/`, runbook `plans/phase-07.md`):
+- **VPS:** Ubuntu, Node 24 LTS, shared with other services (socat, next-server, cloudflared) that the deployment never touches; the firewall is left as it is (port 3000 is open).
+- **No reverse proxy, no TLS** (Part 0, Decisions): adapter-node listens on `HOST=0.0.0.0`, `PORT=3000`. HTTPS can be added later in front (Tailscale or a Cloudflare Tunnel) without code changes.
+- **Runs from the repository checkout**, because migrations, `src/lib/server/content/` and the blocklist are read relative to the working directory. Configuration is `<repo>/.env`: mode 600 and owned by the deploy user.
+- **systemd** (`deploy/silentenglish.service`):
+  - `ExecStart=/usr/bin/env node build/index.js` as the deploy user;
+  - `Restart=always`, `NODE_ENV=production`;
+  - hardening: `NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=full`, `ProtectHome=read-only`, with `ReadWritePaths=<repo>/data` the only writable path, so `DATABASE_PATH` lives there.
+- **One-time setup with sudo** (`deploy/install.sh`): installs the unit, and a validated sudoers drop-in that lets the deploy user run only `systemctl restart|status silentenglish` and `journalctl -u silentenglish` without a password. It does not start the app while the port is taken.
+- **Deploy** (`deploy/deploy.sh`, no sudo password):
+  - `git pull --ff-only` (skipped on a detached HEAD: rollback = `git checkout <commit>` + deploy), then `npm ci`;
+  - the build with **only** `ORIGIN` taken from `.env` (SvelteKit 3 fixes it at build time);
+  - a pre-deploy snapshot, the restart, then up to 30 s of polling `GET /healthz`; on failure, the last 50 journal lines and a non-zero exit.
+- **`/healthz`** (public, on the allowlist): `200 {"ok":true,"db":"ok","migrations":n}` after a trivial query, else 503.
+- **Backups:**
+  - `npm run db:snapshot` writes `VACUUM INTO data/backups/app-YYYYMMDD-HHMM.db`, checked with `PRAGMA integrity_check`; the newest 14 are kept.
+  - `deploy/backup.sh` runs it at 03:30, and `deploy.sh` before each restart.
+  - Restoring a snapshot into a scratch file and opening it is the Phase 7 hard gate.
+  - Litestream offsite replication is optional (`deploy/litestream.yml.example`).
+- **Cron:**
+  - the deploy user's own crontab (`deploy/crontab.example`, `CRON_TZ=Asia/Ho_Chi_Minh`): prefetch at 03:00 and backup at 03:30;
+  - jobs run through `deploy/cron-run.sh`, which logs to `data/logs/` with size-based rotation;
+  - `CRON_SECRET` is read from `.env` and passed to curl on stdin;
+  - each prefetch run also deletes expired login sessions.
 
 Total cost: the VPS, plus LLM usage of a few cents per month.
 
@@ -825,20 +842,32 @@ This phase produces asset files with a one-off script in `tool/`. It adds no app
 
 #### Phase 7 — Deploy to the VPS
 
-Deploy early, while the app is nearly empty. Infrastructure problems are much cheaper to find now than after four feature phases. No reverse proxy and no TLS (Part 0, Decisions): the app is served by Node on `http://<server IP>:3000`.
+Built after Phase 10 (the owner's build order). No reverse proxy and no TLS (Part 0, Decisions): the app is served by Node on `http://103.82.195.48:3000`, on a VPS that also runs other services.
 
-> Produce the deployment setup in `deploy/` and a runbook in `plans/phase-07.md`.
+> Produce in `deploy/`:
+> - **`silentenglish.service`**, a systemd unit template:
+>   - `User=` and `WorkingDirectory=` are filled in by `install.sh`;
+>   - `EnvironmentFile=<repo>/.env`, `ExecStart=/usr/bin/env node build/index.js`, `Restart=always`, `RestartSec=3`;
+>   - `NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=full`, `ProtectHome=read-only`, and `ReadWritePaths=<repo>/data`.
+> - **`install.sh`**, run once with sudo and idempotent:
+>   - it renders, installs and enables the unit;
+>   - it adds a sudoers drop-in, validated with `visudo -cf`, allowing only `systemctl restart|status silentenglish` and `journalctl -u silentenglish` without a password;
+>   - it refuses a missing `.env` or one that is not mode 600;
+>   - it does not start the service while port 3000 is taken.
+> - **`deploy.sh`**, no password, `set -euo pipefail`:
+>   - `git pull --ff-only`, `npm ci`, then a build with only `ORIGIN` read from `.env`;
+>   - a pre-deploy snapshot, then `sudo systemctl restart silentenglish`;
+>   - polling `/healthz` for 30 s; on failure, the last 50 journal lines.
+> - **`backup.sh`:** `npm run db:snapshot` (VACUUM INTO `data/backups/`, `PRAGMA integrity_check`, the newest 14 kept).
+> - **`crontab.example`:** prefetch at 03:00 and backup at 03:30, `CRON_TZ=Asia/Ho_Chi_Minh`, logs in `data/logs/` with size-based rotation.
+> - **`litestream.yml.example`:** optional offsite replication.
 >
-> 1. `deploy/silentenglish.service` — a systemd unit running `node build/index.js` with `HOST=0.0.0.0` and `PORT=3000`, `Restart=always`, `EnvironmentFile=/etc/silentenglish/.env`, running as a non-root user.
-> 2. `deploy/litestream.yml` — continuous replication of `data/app.db` to S3-compatible storage, with the bucket and credentials read from env.
-> 3. `deploy/deploy.sh` — `git pull && npm ci && npm run build && sudo systemctl restart silentenglish`, failing loudly on any step. It must export `ORIGIN` from `/etc/silentenglish/.env` before `npm run build`: SvelteKit 3 fixes the origin at build time (Part II §6).
-> 4. `deploy/crontab` — call the prefetch endpoint at 03:00 Asia/Ho_Chi_Minh with the `CRON_SECRET` (POST, `Content-Type: application/json`, body `{}`).
-> 5. A runbook in `plans/phase-07.md` covering, in order: create the non-root user, SSH key-only access with password login disabled, ufw allowing only SSH and 3000, fail2ban, install Node, create `/etc/silentenglish/.env` with mode 600 (`ORIGIN`, `COOKIE_SECURE=false`, `HOST`, `PORT` as in `.env.example`), first deploy, verify Litestream is replicating, and **restore the database from backup into a scratch directory to prove the backup actually works**.
+> Add a public **`/healthz`** (allowlisted with a comment): `200 {"ok":true,"db":"ok","migrations":n}` or 503. Move to Node 24 LTS (`.nvmrc`, `engines`). Complete the production block in `.env.example`. Write the runbook in `plans/phase-07.md`.
 >
 > Do not put any secret in the repository. The `.env` file is created by hand on the server.
 
-**Result:** the app running at `http://<server IP>:3000` with backups.
-**Check:** open it on a phone over 4G and log in; `systemctl status` is green; **restore the database from backup once and open it** — a backup that has never been restored is not a backup.
+**Result:** the app running at `http://103.82.195.48:3000` as a systemd service, deployed with one passwordless command, with nightly verified snapshots.
+**Check:** open it on a phone over 4G and log in; `systemctl status` is green; `/healthz` answers; **restore a snapshot into a scratch file once and open it**. A backup that has never been restored is not a backup.
 
 ---
 
@@ -948,7 +977,7 @@ Deploy early, while the app is nearly empty. Infrastructure problems are much ch
 | 1 | Pseudo-word list reviewed by hand; Tatoeba pair count known |
 | 3 | Intervals grow sensibly in a manual walkthrough |
 | 5 | In `eval:cloze`, a human finds at most 1 bad item among 30 validated items |
-| 7 | Database restored from backup successfully once |
+| 7 | A snapshot restored and opened once (`plans/phase-07.md`, step 9) |
 | 9 | A full session completes, with one start request and one finish request |
 
 ### Three most likely failures

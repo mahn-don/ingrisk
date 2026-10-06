@@ -144,10 +144,10 @@ describe('authConfig', () => {
 
 describe('access guard', () => {
 	it('allows exactly the public allowlist', () => {
-		for (const p of ['/login', '/api/cron/prefetch', '/_app/immutable/x.js', '/_app/version.json', '/_app/env.js', '/favicon.svg', '/robots.txt']) {
+		for (const p of ['/login', '/healthz', '/api/cron/prefetch', '/_app/immutable/x.js', '/_app/version.json', '/_app/env.js', '/favicon.svg', '/robots.txt']) {
 			expect(isPublicPath(p), p).toBe(true);
 		}
-		for (const p of ['/', '/stats', '/settings', '/session', '/api/anything', '/api/cron', '/_app/remote/abc', '/login/extra', '/loginx', '/dev/components', '/offline', '/manifest.webmanifest', '/service-worker.js', '/icons/icon-192.png', '/%5Fapp/immutable/x']) {
+		for (const p of ['/', '/stats', '/settings', '/session', '/api/anything', '/api/cron', '/_app/remote/abc', '/login/extra', '/loginx', '/healthz/', '/healthz/x', '/healthzx', '/api/healthz', '/api/backup', '/dev/components', '/offline', '/manifest.webmanifest', '/service-worker.js', '/icons/icon-192.png', '/%5Fapp/immutable/x']) {
 			expect(isPublicPath(p), p).toBe(false);
 		}
 	});

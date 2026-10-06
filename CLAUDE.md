@@ -18,7 +18,7 @@ architecture, Part III the phased build plan. `plans/roadmap.md` tracks phase st
 - Vitest (unit) + Playwright (e2e)
 - SQLite via `better-sqlite3`, Drizzle ORM + `drizzle-kit`
 - `ts-fsrs` (scheduling), `zod` (validation), `@node-rs/argon2` (password hashing)
-- npm, Node 22 LTS (>= 22.18: `tool/` scripts run as TypeScript via Node's type stripping, so
+- npm, Node 24 LTS (`.nvmrc`; `tool/` scripts run as TypeScript via Node's type stripping, so
   only erasable syntax there: no `enum`, `namespace` or parameter properties)
 
 Import from `src/lib` with the `#lib` alias and an explicit `.js` extension, e.g.
@@ -61,7 +61,8 @@ src/
 scripts/                 repo tooling (check-strings.mjs)
 tool/                    data preparation scripts (`lib/` pure + tested), `raw/` inputs
 data/                    SQLite database files (never committed)
-deploy/                  systemd unit, Litestream config, deploy script, crontab
+deploy/                  systemd unit template, install.sh (sudo, once), deploy.sh, backup.sh,
+                         prefetch.sh + cron-run.sh, crontab and Litestream examples
 .githooks/pre-commit     blocks .env / *.db files and runs gitleaks
 ```
 
@@ -96,10 +97,15 @@ SvelteKit 3 renamed `$app/environment` to `$app/env`.
 | `npm run db:generate` | Generate a SQL migration from `src/lib/server/db/schema.ts` (commit it) |
 | `npm run db:migrate` | Apply pending migrations to `DATABASE_PATH` (default `data/app.db`) |
 | `npm run db:studio` | Browse the database with Drizzle Studio |
+| `npm run db:snapshot -- [--label L] [--keep 14]` | `VACUUM INTO data/backups/app-YYYYMMDD-HHMM.db`, `integrity_check`, keep the newest 14 |
 | `npm run srs:walkthrough` | Print one card's FSRS intervals through a fixed rating sequence |
 | `npm run llm:provider:add -- ...` | Add/update an LLM provider row (stores the env var *name*, never a key) |
 | `npm run llm:smoke -- --provider <name>` | One live structured call to a provider (manual; never in CI) |
 | `npm run verify` | `check` → `lint:strings` → `test` → `build`, stops at first failure |
+
+Deploy (VPS; runbook `plans/phase-07.md`; scripts take `DRY_RUN=1`): once `sudo NODE_BIN="$(command -v node)"
+deploy/install.sh`; then `deploy/deploy.sh` (no password; rollback: `git checkout <commit>` first),
+`deploy/backup.sh`, logs `sudo journalctl -u silentenglish -f` and `data/logs/`.
 
 ## Hard rules
 
@@ -147,6 +153,6 @@ SvelteKit 3 renamed `$app/environment` to `$app/env`.
 ## Environment
 
 Variables are listed in `.env.example`. Copy it to `.env` locally; on the server they live in
-`/etc/silentenglish/.env` (mode 600). Never create or edit a committed env file. `ORIGIN` is read
+`<repo>/.env` (mode 600, owned by the deploy user; never sourced whole into a build). Never create or edit a committed env file. `ORIGIN` is read
 at build time (`vite.config.ts` `paths.origin`; adapter-node 6 has no runtime `ORIGIN`): build with
 it set, or plain-HTTP logins fail CSRF with 403.

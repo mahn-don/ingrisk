@@ -1,17 +1,17 @@
 # SilentEnglish
 
 A personal, single-user web app for learning English reading, writing, vocabulary and grammar,
-with a Vietnamese UI and no audio. Built with SvelteKit and SQLite; designed to be installed as a
-PWA on a phone and run on a small VPS. The design lives in [`docs/architecture.md`](docs/architecture.md).
+with a Vietnamese UI and no audio. Built with SvelteKit and SQLite; used in a phone's browser and
+run on a small VPS (deployment runbook: [`plans/phase-07.md`](plans/phase-07.md)). The design lives in [`docs/architecture.md`](docs/architecture.md).
 
 ## Prerequisites
 
-- Node.js 22 LTS, **22.18 or newer** (with npm); the `tool/` scripts run TypeScript directly via Node's type stripping
+- Node.js 24 LTS (with npm; `.nvmrc`); the `tool/` scripts run TypeScript directly via Node's type stripping
 - [gitleaks](https://github.com/gitleaks/gitleaks) on your `PATH` (the pre-commit hook refuses to
   commit without it), e.g. `brew install gitleaks` or
   `go install github.com/zricethezav/gitleaks/v8@latest`
 
-`better-sqlite3` is pinned to 12.x, which ships prebuilt binaries for Node 22: macOS and Linux
+`better-sqlite3` is pinned to 12.x, which ships prebuilt binaries for Node 24: macOS and Linux
 x64/arm64 install without a compiler; only unusual platforms fall back to building from source
 (which needs Python and a C++ toolchain).
 

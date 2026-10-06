@@ -16,6 +16,22 @@ test.describe('the hooks chokepoint', () => {
 		expect(await response.json()).toEqual({ error: 'unauthorized' });
 	});
 
+	test('/healthz is public and says only ok/db/migrations; nothing else opened up', async ({ request }) => {
+		const response = await request.get('/healthz', { maxRedirects: 0 });
+		expect(response.status()).toBe(200);
+		expect(response.headers()['set-cookie']).toBeUndefined();
+		const body = await response.json();
+		expect(Object.keys(body).sort()).toEqual(['db', 'migrations', 'ok']);
+		expect(body).toMatchObject({ ok: true, db: 'ok' });
+		expect(body.migrations).toBeGreaterThan(0);
+		for (const path of ['/healthz/x', '/review', '/settings/providers']) {
+			expect((await request.get(path, { maxRedirects: 0 })).status(), path).toBe(303);
+		}
+		for (const path of ['/api/backup', '/api/healthz', '/api/session/start']) {
+			expect((await request.get(path, { maxRedirects: 0 })).status(), path).toBe(401);
+		}
+	});
+
 	test('/api/cron/prefetch is governed by its own secret, not by a session', async ({ request }) => {
 		const headers = { 'content-type': 'application/json' };
 		const wrong = await request.post('/api/cron/prefetch', { headers: { ...headers, authorization: 'Bearer nope' }, data: {} });

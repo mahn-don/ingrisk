@@ -1,0 +1,37 @@
+# SilentEnglish: the SvelteKit app (adapter-node) on plain HTTP, 0.0.0.0:3000 (HOST/PORT in .env).
+# A template: deploy/install.sh fills in the user, group, repository and node directory
+# placeholders and installs it as /etc/systemd/system/silentenglish.service. Do not edit the
+# installed copy; re-run install.sh.
+#
+# The app runs from the repository checkout: migrations, src/lib/server/content/ and the blocklist
+# are read relative to the working directory. Only data/ (the database, its WAL files, snapshots,
+# logs) is writable; the rest of /home is read-only and /usr, /boot, /etc are read-only.
+
+[Unit]
+Description=SilentEnglish (SvelteKit on Node)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+WorkingDirectory=@REPO@
+# Mode 600, owned by the deploy user (install.sh refuses anything else). Read by systemd as root.
+EnvironmentFile=@REPO@/.env
+Environment=NODE_ENV=production
+# Node is found through PATH (e.g. an nvm install under /home); install.sh checks it is Node 24+.
+Environment=PATH=@NODE_DIR@:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env node build/index.js
+Restart=always
+RestartSec=3
+
+# Hardening that keeps SQLite writable in data/ only.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=@REPO@/data
+
+[Install]
+WantedBy=multi-user.target

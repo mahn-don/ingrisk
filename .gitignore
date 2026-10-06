@@ -24,8 +24,10 @@ vite.config.ts.timestamp-*
 test-results
 playwright-report
 
-# Database files
+# Database files, snapshots (deploy/backup.sh) and job logs (deploy/crontab.example)
 data/*.db*
+data/backups/
+data/logs/
 
 # Tatoeba per-language exports (large; the derived tool/raw/tatoeba-eng-vie.tsv is committed instead)
 tool/raw/tatoeba-full/
