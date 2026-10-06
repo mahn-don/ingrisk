@@ -171,8 +171,15 @@ Every session: warm-up (3–4 due cloze items) → review block (due cards, rate
 
 Read and Write alternate across days. If a graded writing submission has unseen feedback, show it at the start of the session and prefer Read that day.
 
-**Composition as built (Phase 9a, quick shape only; `src/lib/server/session/compose.ts`).**
-- **Size.** Item count = `round(budget_min × 60 / 20)`, about 20 s per item, capped at 30. The budget is 5, 8 or 10 minutes, chosen on Home; the default comes from settings.
+**Composition as built (Phases 9a and 9b; `src/lib/server/session/`).**
+- **Shape** (`src/lib/session/shape.ts`), in priority order:
+  1. A 5-minute budget is Nhanh.
+  2. Otherwise Đọc and Viết alternate after the most recent finished non-quick session (Đọc first).
+  3. Unseen graded feedback prefers Đọc.
+  4. Fallbacks: no cached passage within one band of `known_band_ceiling` → Viết; no LLM provider → Đọc; neither → Nhanh.
+
+  Home shows today's shape ("Hôm nay: Đọc"); it follows the budget chips, and the learner may switch to another available shape. The start request carries the shape, and an unavailable one is refused.
+- **Size.** Review items = `round(minutes × 60 / 20)`, about 20 s per item, capped at 30. The minutes are the budget for Nhanh, and the budget minus 3 (the anchor) for Đọc and Viết. The budget is 5, 8 or 10 minutes, chosen on Home; the default comes from settings.
 - **Reviews.** Due cloze cards from the Phase 3 queue, up to the item count.
 - **New cards.**
   - **Allowance.** At most `new_cards_per_day` per learning day, minus the cards already introduced that day. Cards left New by an abandoned session are served first.
@@ -182,16 +189,23 @@ Read and Write alternate across days. If a graded writing submission has unseen 
   2. Then the other due cards, most overdue first.
   3. One new card after every 3 reviews.
   4. The order is then repaired so that no two items from one sentence are adjacent and no gap type appears more than 3 times in a row.
+- **Mined errors** (cards on the learner's own mistakes) are new cards outside the daily limit: they come right after the opening and are tagged "Lỗi của bạn".
 - **Stock names.** At most 30% of items come from sentences with stock names (Tom, Mary).
 - **Mode.**
   - `choice` while the card is New or Learning, or its stability is under 7 days; `typing` after that, decided per card.
+  - **Meaning cue:** typing items always show the Vietnamese sentence above the gap (recall needs context); choice items keep it behind "Xem nghĩa câu", which counts as a hint (Hard).
   - Article gaps are always `choice`.
   - Typing accepts one typo (Levenshtein distance 1) in answers of 5+ letters, but rates it Hard and shows the spelling. The hint reveals the first letter and also gives Hard.
 - **Rating.** Auto-rating as in §2. The feedback panel shows the next interval for that rating and lets the learner change it (Quên / Khó / Được / Dễ).
 - **One request in, one request out.**
   - **Start** returns every item, with the answer and the four rating intervals, and stores the served items.
   - **Finish** applies all reviews and records the session in one transaction. Each review time is the session start plus the answer's offset, never the device clock. A repeated finish with the same client id returns the stored summary.
-- **End screen.** Items answered, accuracy, words strengthened (reviewed cards whose stability rose; first reviews excluded), new cards, the next review time and today's study minutes. Streaks and the weekly goal are Phase 10.
+- **Order of a session.** Unseen graded feedback first (placement and late-graded session writing; each marked seen when dismissed), then the cards, then 2 error drills (Đọc and Viết only), then the anchor.
+- **Error drills** (one-off practice from the 5b stock, not cards): the topic codes come from the weakness profile, i.e. the most errors over 30 days in graded writing, lapses on grammar cloze cards and missed drills; with no errors, random codes. The learner edits the prefilled sentence; it is right when it normalizes to the correction (final punctuation ignored). Results go to `drill_results`.
+- **Đọc anchor.** One cached passage nearest `known_band_ceiling` (within one band), marked served. Glossary words are underlined and show their Vietnamese meaning; "Thêm vào ôn tập" creates a New card when a validated lexical cloze item exists for the word's lexeme (it is introduced within the daily limit). Then the 2 questions, each with feedback and its explanation.
+- **Viết anchor.** Writing and translation alternate across Viết sessions. Writing: a prompt for the band not used in the last 14 days. Translation: a Tatoeba sentence at or below the band, without stock names, never served before; the feedback says plainly whether the meaning came across and shows the reference as one valid answer. The submission is stored (queued) and graded for up to 30 s; in time, the feedback is shown inline (corrected text with the changes highlighted in direct mode; up to 3 errors with their code's Vietnamese name; the task note when off topic); otherwise the session goes on and the feedback comes at the next start.
+- **Error mining** (`session/mining.ts`). Every graded error (at most 3 per submission) whose correction is found exactly once in the corrected text, and is at most 4 tokens long, becomes a `user_error` cloze item on that corrected sentence (its own `sentences` row, Vietnamese from the prompt or source) with a New card made at once. Options: the learner's own wrong form plus distractors from the 5a tables (ART, PRE, SVA, TNS, PLU); other codes, or fewer than 3 distractors, are typing-only. An identical sentence and span is never mined twice.
+- **End screen.** Items answered, accuracy, words strengthened (reviewed cards whose stability rose; first reviews excluded), new cards, the next review time and today's study minutes; plus the anchor's outcome (reading score, or writing graded / later / skipped), drills right, and "Lỗi mới được thêm vào ôn tập: N". Streaks and the weekly goal are Phase 10.
 
 **Error mining:** every error the LLM identifies becomes a candidate card tagged with its taxonomy code, so the review pool gradually targets the learner's real weaknesses.
 
@@ -318,7 +332,7 @@ sentences(id, en_text, vi_text, source, tatoeba_id_en UNIQUE, tatoeba_id_vi,
 -- blocked: matched the content blocklist (kept, never deleted; blocked_reason names the term);
 -- has_stock_names: the English contains Tom or Mary. (last three: migration 0003)
 
-cloze_items(id, sentence_id → sentences, gap_type, token_index, answer, options,
+cloze_items(id, sentence_id → sentences, gap_type, token_index, token_count, typing_only, answer, options,
             answer_vi, lexeme_id → lexemes, grammar_topic_id → grammar_topics,
             level_band, rule_ok, critic_ok, validated, rejection_reason, critic_notes,
             prompt_version, model, content_hash UNIQUE, created_at)
@@ -326,6 +340,10 @@ cloze_items(id, sentence_id → sentences, gap_type, token_index, answer, option
 -- token_index: the gap's index in the sentence's token list; options: JSON array of 4 strings
 -- in display order ('—' = no word); critic_ok is NULL when the rules already failed.
 -- Rejected items are kept (validated = 0) for inspection.
+-- Phase 9b (migration 0008, a rebuild for the CHECK): gap_type gains user_error (a mined learner
+-- error: its own sentences row with source = 'user_error', the gap on the correction span of up to
+-- 4 tokens = token_count, prompt_version 'user_error', critic_ok NULL); typing_only items have no
+-- options (a code without a distractor table, or fewer than 3 distractors).
 
 cards(id, kind, lexeme_id → lexemes, sentence_id → sentences,
       grammar_topic_id → grammar_topics,
@@ -345,8 +363,10 @@ review_logs(id, card_id → cards ON DELETE RESTRICT,
 sessions(id, client_session_id UNIQUE, started_at, ended_at, budget_min, shape,
          items_done, streak_after, status, served_json, finished_at, summary_json)
 -- (last four: migration 0007) status ∈ in_progress | finished | abandoned, at most one
--- in_progress (partial unique index; a new start abandons it). served_json: the items served
--- ({cardId, mode, isNew}), which finish checks results against. summary_json: the finish summary,
+-- in_progress (partial unique index; a new start abandons it). served_json: what was served,
+-- which finish checks results against: from 9b {cards: [{cardId, mode, isNew}], drills:
+-- [{cacheId, topicCode}], anchor: reading {cacheId, questions, glossary word → cloze item id} |
+-- writing {promptId} | translation {sentenceId} | null}; 9a rows hold the bare cards array. summary_json: the finish summary,
 -- returned again on a repeated finish. client_session_id holds a server placeholder
 -- ("pending:<uuid>") until the client's id arrives with the results. Rows from before 0007 read
 -- as finished. 0007 is hand-written (ADD COLUMN with a column CHECK): drizzle-kit's table rebuild
@@ -366,17 +386,30 @@ job_locks(name PK, holder, acquired_at)
 
 writing_submissions(id, session_id → sessions ON DELETE SET NULL, prompt,
                     user_text, corrected_text, errors_json, cefr_estimate, status,
-                    submitted_at, scored_at, feedback_seen_at)
+                    submitted_at, scored_at, feedback_seen_at,
+                    task_kind, prompt_id, sentence_id → sentences ON DELETE SET NULL,
+                    reference_en, on_topic, task_note_vi, meaning_ok, mined_at, mined_count)
+-- (last nine: migration 0008, ADD COLUMNs) task_kind ∈ writing | translation; prompt holds the
+-- Vietnamese prompt or source sentence; prompt_id (writing-prompts.json) keeps prompts from
+-- repeating within 14 days; sentence_id (translation) is never served again; on_topic false keeps
+-- the CEFR out of every estimate; mined_count = cards made from its errors.
+
+drill_results(id, session_id → sessions ON DELETE CASCADE,
+              cache_id → generated_cache ON DELETE RESTRICT, topic_code, correct, answered_at)
+-- (migration 0008) One answered error drill: one-off practice, not a card. The weakness profile
+-- counts the missed ones.
 
 grammar_topics(id, code UNIQUE, name_vi, name_en, l1_interference)
 -- seeded with the 10 codes of Part I §6.
 ```
 
-Indexes: `cards(due)`, `sessions(finished_at)`, `sessions(status) WHERE status = 'in_progress'` (unique), `placement_attempts(status) WHERE status = 'in_progress'` (unique), `review_logs(card_id, review)`, `sentences(blocked, level_band)`, `cloze_items(validated, gap_type, level_band)`, `cloze_items(sentence_id)`, `llm_calls(created_at)`, `collocations(lexeme_id)`, `generated_cache(kind, params_hash)`, `generated_cache(kind, validated, served_at)`, `writing_submissions(status)`, plus the unique indexes above.
+Indexes: `cards(due)`, `drill_results(answered_at)`, `sessions(finished_at)`, `sessions(status) WHERE status = 'in_progress'` (unique), `placement_attempts(status) WHERE status = 'in_progress'` (unique), `review_logs(card_id, review)`, `sentences(blocked, level_band)`, `cloze_items(validated, gap_type, level_band)`, `cloze_items(sentence_id)`, `llm_calls(created_at)`, `collocations(lexeme_id)`, `generated_cache(kind, params_hash)`, `generated_cache(kind, validated, served_at)`, `writing_submissions(status)`, plus the unique indexes above.
 
 Enumerations: `kind` ∈ cloze | translate | grammar | reading | error (cards and generated_cache); `status` ∈ queued | scored | failed; `wire_format` ∈ openai | anthropic; `structured_mode` ∈ json_schema | tool | json_prompt; `shape` ∈ quick | read | write; `writing_status` ∈ none | queued | scored; `feedback_mode` ∈ direct | indirect; `prompt_mode` ∈ choice | typing; `state` ∈ New | Learning | Review | Relearning and `rating` ∈ Manual | Again | Hard | Good | Easy (ts-fsrs `State` and `Rating` names); CEFR columns ∈ A1 … C2; `code` ∈ the taxonomy codes; `gap_type` ∈ lexical | article | preposition | verb_form.
 
 Connection (`src/lib/server/db/client.ts`): `DATABASE_PATH` (default `data/app.db`), pragmas `journal_mode = WAL` (required by Litestream), `foreign_keys = ON`, `busy_timeout = 5000`, `synchronous = NORMAL`. Migrations run at server start from the SvelteKit `init` hook; a failed migration stops the server.
+
+**Foreign keys are off while migrations run** (from Phase 9b). drizzle's migrator wraps all pending migrations in one transaction, where `PRAGMA foreign_keys=OFF` is a no-op, so a table rebuild (the only way to change a CHECK in SQLite) could not drop a table that others reference: ON DELETE RESTRICT fails and SET NULL silently clears the links. `migrate()` therefore turns foreign keys off around the run, back on afterwards, and then requires `PRAGMA foreign_key_check` to come back empty, or it throws and the server refuses to start. Earlier hand-written workarounds (0002, 0007) stay as they are.
 
 ### 4. LLM layer
 
@@ -467,7 +500,7 @@ Generation is batch and ahead of time, never during a session. Every prompt modu
 
 **Writing-feedback schema** (`llm/prompts/feedback.ts`)
 ```ts
-const WritingFeedback = z.object({
+const BaseFeedback = z.object({
   corrected_text: z.string(),
   errors: z.array(z.object({
     original: z.string(),
@@ -482,8 +515,14 @@ const WritingFeedback = z.object({
     coherence: z.number().int().min(1).max(5)
   }).strict()
 }).strict();
-const TranslationFeedback = WritingFeedback.extend({ meaning_ok: z.boolean() });
+// Phase 9b: writing is checked for task relevance (grade-writing@2).
+const WritingFeedback = BaseFeedback.extend({ on_topic: z.boolean(), task_note_vi: z.string() });
+const TranslationFeedback = BaseFeedback.extend({ meaning_ok: z.boolean() });
 ```
+
+**Task relevance (Phase 9b).** `on_topic` says whether the text answers the task; `task_note_vi`, when it does not, says in one kind Vietnamese sentence what the task asked (else empty). The English is graded the same way either way. An off-topic submission's CEFR estimate is stored on the submission but never used: not in a placement result (the result gets the reliability flag `writing_off_topic` instead) and not in the profile. The grading eval has an off-topic fixture (`expected_on_topic: false`).
+
+**Grades are applied in one place** (`grading/apply.ts`), whether they arrive live (placement, a Viết session) or later (`gradeQueuedWritings`, which grades translations with `gradeTranslation` against the stored reference). It marks the submission scored, refines a linked placement result (unless off topic), and mines the errors into cards (Part I §8).
 
 Anthropic rejects array-size and numeric constraints in the provider schema (Part II §4), so the wire schema carries none and Zod enforces them locally. A list of more than 3 errors is cut to the 3 most important, instead of failing a live grading call and paying for a repair round.
 
@@ -815,12 +854,12 @@ Deploy early, while the app is nearly empty. Infrastructure problems are much ch
 
 #### Phase 9 — Session loop
 
-**Split (the owner's decision):**
+**Split (the owner's decision); both parts are done:**
 - **9a (done): the session engine and the daily cloze review loop.**
   - Composition, the start/finish API, the shared answer check, the `/session` screen, and Home's start button with budget chips.
   - Only the **Nhanh** shape is built, so after 9a the app is usable daily for quick reviews.
   - Details are in Part I §8 and `plans/phase-09a.md`.
-- **9b: the rest of this section.**
+- **9b (done): the rest of this section**, as built in Part I §8 and `plans/phase-09b.md`:
   - **Anchors:** Đọc (a graded passage + 2 questions), Viết (a writing task or a VI→EN translation) and error-correction drills.
   - **Rotation:** Đọc/Viết on alternating days, and degrading to Nhanh with a prefetch prompt when stock is short.
   - **Unseen feedback:** shown at the start of a session (placement writings included), which makes that day prefer Đọc.

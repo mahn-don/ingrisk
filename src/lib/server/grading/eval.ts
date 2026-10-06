@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { TOPIC_CODES } from '../db/schema.ts';
 import type { LlmDeps } from '../llm/client.ts';
 import { LlmError } from '../llm/errors.ts';
-import type { WritingFeedback } from '../llm/prompts/feedback.ts';
+import type { BaseFeedback } from '../llm/prompts/feedback.ts';
 import { gradeTranslation, gradeWriting } from './grading.ts';
 
 export const GRADING_FIXTURES_PATH = 'test/eval/grading-fixtures.json';
@@ -12,7 +12,7 @@ export const GRADING_FIXTURES_PATH = 'test/eval/grading-fixtures.json';
 const Base = { id: z.string(), level_band: z.number().int().min(1).max(8), expected_codes: z.array(z.enum(TOPIC_CODES)), note: z.string() };
 export const GradingFixture = z.discriminatedUnion('type', [
 	z.object({ ...Base, type: z.literal('translation'), vi: z.string(), reference_en: z.string(), user_en: z.string() }),
-	z.object({ ...Base, type: z.literal('writing'), prompt_vi: z.string(), user_text: z.string() })
+	z.object({ ...Base, type: z.literal('writing'), prompt_vi: z.string(), user_text: z.string(), expected_on_topic: z.boolean().optional() })
 ]);
 export type GradingFixture = z.infer<typeof GradingFixture>;
 
@@ -22,7 +22,9 @@ export function readGradingFixtures(path = GRADING_FIXTURES_PATH): GradingFixtur
 
 export interface GradingRun {
 	codes: string[];
-	errors: WritingFeedback['errors'];
+	errors: BaseFeedback['errors'];
+	/** Writing only: the task-relevance verdict. */
+	onTopic: boolean | null;
 	cefr: string;
 	meaningOk: boolean | null;
 	/** Errors the guard dropped (quoted text not in the answer): invented by definition. */
@@ -58,6 +60,7 @@ export async function gradeFixture(fixture: GradingFixture, runs: number, llm: L
 				errors: feedback.errors,
 				cefr: feedback.cefr_estimate,
 				meaningOk: 'meaning_ok' in feedback ? (feedback.meaning_ok as boolean) : null,
+				onTopic: 'on_topic' in feedback ? (feedback.on_topic as boolean) : null,
 				dropped: graded.dropped,
 				model: graded.model
 			});
@@ -89,6 +92,9 @@ export function gradingSummary(results: readonly FixtureResult[]): string[] {
 		`correct translations with zero errors and meaning_ok in every run: ${
 			correct.filter((r) => r.runs.every((x) => isRun(x) && x.codes.length === 0 && x.meaningOk === true)).length
 		}/${correct.length}`,
+		`on_topic as expected in every run: ${
+			results.filter((r) => r.fixture.type === 'writing' && r.fixture.expected_on_topic !== undefined && r.runs.every((x) => isRun(x) && x.onTopic === (r.fixture as { expected_on_topic?: boolean }).expected_on_topic)).length
+		}/${results.filter((r) => r.fixture.type === 'writing' && r.fixture.expected_on_topic !== undefined).length} writing fixtures`,
 		`cefr_estimate agrees across runs: ${results.filter((r) => r.cefrAgree === true).length}/${results.length}`,
 		`failed runs: ${failedRuns}`
 	];
@@ -97,13 +103,14 @@ export function gradingSummary(results: readonly FixtureResult[]): string[] {
 export function gradingMarkdown(results: readonly FixtureResult[], generatedAt: Date): string {
 	const lines = ['# Grading evaluation', '', `Generated ${generatedAt.toISOString()}. Each fixture graded ${results[0]?.runs.length ?? 0} times.`, ''];
 	for (const line of gradingSummary(results)) lines.push(`- ${line}`);
-	lines.push('', '| Fixture | Expected | Run codes | Expected found | Invented | Extra codes | CEFR | meaning_ok |', '|---|---|---|---|---|---|---|---|');
+	lines.push('', '| Fixture | Expected | Run codes | Expected found | Invented | Extra codes | CEFR | meaning_ok | on_topic |', '|---|---|---|---|---|---|---|---|---|');
 	for (const r of results) {
 		const runs = r.runs.map((x) => (isRun(x) ? x.codes.join(' ') || '—' : 'failed')).join(' / ');
 		const cefr = r.runs.map((x) => (isRun(x) ? x.cefr : '?')).join(' / ') + (r.cefrAgree === false ? ' ⚠' : '');
 		const meaning = r.runs.map((x) => (isRun(x) && x.meaningOk !== null ? String(x.meaningOk) : '—')).join(' / ');
+		const onTopic = r.runs.map((x) => (isRun(x) && x.onTopic !== null ? String(x.onTopic) : '—')).join(' / ');
 		lines.push(
-			`| ${r.fixture.id} | ${r.fixture.expected_codes.join(' ') || '—'} | ${runs} | ${r.expectedFound.map((b) => (b ? '✓' : '✗')).join(' / ')} | ${r.invented.join(' / ')} | ${r.extraCodes.map((c) => c.join(' ') || '—').join(' / ')} | ${cefr} | ${meaning} |`
+			`| ${r.fixture.id} | ${r.fixture.expected_codes.join(' ') || '—'} | ${runs} | ${r.expectedFound.map((b) => (b ? '✓' : '✗')).join(' / ')} | ${r.invented.join(' / ')} | ${r.extraCodes.map((c) => c.join(' ') || '—').join(' / ')} | ${cefr} | ${meaning} | ${onTopic} |`
 		);
 	}
 	lines.push('', '## Details', '');

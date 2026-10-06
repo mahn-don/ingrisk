@@ -57,6 +57,13 @@
       "when": 1791194826207,
       "tag": "0007_session_engine",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791251579215,
+      "tag": "0008_anchors_and_mining",
+      "breakpoints": true
     }
   ]
 }

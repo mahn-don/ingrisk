@@ -1,17 +1,20 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, gte, isNotNull, isNull } from 'drizzle-orm';
 import type { DbOrTx } from '../client.ts';
 import { type CEFR_LEVELS, type WritingError, writingSubmissions } from '../schema.ts';
 
 export type WritingSubmission = typeof writingSubmissions.$inferSelect;
-export type NewWritingSubmission = Pick<
-	typeof writingSubmissions.$inferInsert,
-	'sessionId' | 'prompt' | 'userText' | 'submittedAt'
->;
+export type NewWritingSubmission = Pick<typeof writingSubmissions.$inferInsert, 'sessionId' | 'prompt' | 'userText' | 'submittedAt'> &
+	Partial<Pick<typeof writingSubmissions.$inferInsert, 'taskKind' | 'promptId' | 'sentenceId' | 'referenceEn'>>;
 
 export interface WritingFeedback {
 	correctedText: string;
 	errors: WritingError[];
 	cefrEstimate: (typeof CEFR_LEVELS)[number];
+	/** Writing: answered the task (null: not judged, e.g. translation). */
+	onTopic?: boolean | null;
+	taskNoteVi?: string | null;
+	/** Translation: the meaning came across. */
+	meaningOk?: boolean | null;
 }
 
 /** Writing submissions: queued on submit, scored later, feedback shown once. */
@@ -52,6 +55,9 @@ export function writingRepo(db: DbOrTx) {
 				correctedText: feedback.correctedText,
 				errorsJson: feedback.errors,
 				cefrEstimate: feedback.cefrEstimate,
+				onTopic: feedback.onTopic ?? null,
+				taskNoteVi: feedback.taskNoteVi ?? null,
+				meaningOk: feedback.meaningOk ?? null,
 				scoredAt: now
 			});
 		},
@@ -69,6 +75,39 @@ export function writingRepo(db: DbOrTx) {
 		},
 		markSeen(id: number, now = new Date()): WritingSubmission {
 			return setById(id, { feedbackSeenAt: now });
+		},
+		markMined(id: number, count: number, now: Date): WritingSubmission {
+			return setById(id, { minedAt: now, minedCount: count });
+		},
+		/** The submission of a session's writing anchor, if any. */
+		forSession(sessionId: number): WritingSubmission | undefined {
+			return db.select().from(writingSubmissions).where(eq(writingSubmissions.sessionId, sessionId)).get();
+		},
+		/** Scored since `since` (the weakness profile reads their errors). */
+		scoredSince(since: Date): WritingSubmission[] {
+			return db
+				.select()
+				.from(writingSubmissions)
+				.where(and(eq(writingSubmissions.status, 'scored'), gte(writingSubmissions.scoredAt, since)))
+				.all();
+		},
+		/** Source sentences already given as translation tasks (never served twice). */
+		translationSentenceIds(): number[] {
+			return db
+				.select({ id: writingSubmissions.sentenceId })
+				.from(writingSubmissions)
+				.where(isNotNull(writingSubmissions.sentenceId))
+				.all()
+				.map((r) => r.id!);
+		},
+		/** Writing prompts used since `since` (not repeated within 14 days). */
+		promptIdsSince(since: Date): Set<string> {
+			const rows = db
+				.select({ id: writingSubmissions.promptId })
+				.from(writingSubmissions)
+				.where(and(isNotNull(writingSubmissions.promptId), gte(writingSubmissions.submittedAt, since)))
+				.all();
+			return new Set(rows.map((r) => r.id!));
 		}
 	};
 }

@@ -4,6 +4,8 @@
 	import Card from '#lib/components/Card.svelte';
 	import { fill } from '#lib/format.js';
 	import { t } from '#lib/messages/vi.js';
+	import { defaultShape, shapeOptions } from '#lib/session/shape.js';
+	import type { SessionShape } from '#lib/session/types.js';
 
 	let { data } = $props();
 	const stats = $derived([
@@ -16,6 +18,12 @@
 	const budgets = $derived([...new Set([5, 8, 10, data.defaultBudget])].sort((a, b) => a - b));
 	// svelte-ignore state_referenced_locally
 	let budget = $state(data.defaultBudget);
+	// Today's shape follows the budget (5 min is Nhanh); the learner may pick another available one.
+	let picked = $state<SessionShape | null>(null);
+	const context = $derived({ ...data.shape, budgetMin: budget });
+	const options = $derived(shapeOptions(context));
+	const shape = $derived(picked !== null && options.some((o) => o.shape === picked && o.available) ? picked : defaultShape(context));
+	const shapeName = (s: SessionShape) => t.session.shapes[s];
 </script>
 
 <svelte:head>
@@ -77,6 +85,22 @@
 
 <!-- The primary action sits low, in the thumb zone. -->
 <div class="mt-auto flex flex-col gap-3 pt-8">
+	<p class="text-center text-sm font-semibold text-primary" data-testid="shape-today">{fill(t.home.shapeToday, { shape: shapeName(shape) })}</p>
+	<fieldset class="flex items-center justify-center gap-2">
+		<legend class="sr-only">{t.home.shapeChoose}</legend>
+		{#each options as option (option.shape)}
+			<button
+				type="button"
+				class="min-h-10 rounded-full border-2 px-4 text-sm font-medium disabled:border-dashed disabled:opacity-60 {shape === option.shape
+					? 'border-primary bg-primary-soft font-semibold text-primary'
+					: 'border-control bg-surface text-text'}"
+				aria-pressed={shape === option.shape}
+				disabled={!option.available}
+				aria-label={option.available ? shapeName(option.shape) : fill(t.home.shapeUnavailable, { shape: shapeName(option.shape) })}
+				onclick={() => (picked = option.shape)}>{shapeName(option.shape)}</button
+			>
+		{/each}
+	</fieldset>
 	<fieldset class="flex items-center justify-center gap-2">
 		<legend class="sr-only">{t.home.budget}</legend>
 		{#each budgets as minutes (minutes)}
@@ -90,5 +114,5 @@
 			>
 		{/each}
 	</fieldset>
-	<Button variant="primary" full href="/session?budget={budget}">{t.home.start}</Button>
+	<Button variant="primary" full href="/session?budget={budget}&shape={shape}">{t.home.start}</Button>
 </div>

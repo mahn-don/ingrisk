@@ -52,3 +52,9 @@ export const hintFor = (answer: string) => answer.trim().charAt(0);
 
 /** hintUsed as recorded: the hint button, or a typo. */
 export const effectiveHintUsed = (hintButton: boolean, result: CheckResult) => hintButton || result.typo;
+
+/** Drills: the edited sentence equals the correction after normalization, ignoring final punctuation. */
+export function checkDrill(edited: string, corrected: string): boolean {
+	const strip = (s: string) => normalizeAnswer(s).replace(/[\s.!?…]+$/, '');
+	return strip(edited) !== '' && strip(edited) === strip(corrected);
+}

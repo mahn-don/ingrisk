@@ -3,7 +3,20 @@ import { json } from '@sveltejs/kit';
 import { z } from 'zod';
 import { SessionError } from './engine.ts';
 
-export const StartBody = z.object({ budgetMin: z.number().int().min(1).max(60).optional() }).strict();
+const Shape = z.enum(['quick', 'read', 'write']);
+const Id = z.number().int().positive();
+
+export const StartBody = z.object({ budgetMin: z.number().int().min(1).max(60).optional(), shape: Shape.optional() }).strict();
+export const AnchorBody = z.object({ sessionId: Id, text: z.string().max(20_000) }).strict();
+export const GlossaryBody = z.object({ sessionId: Id, word: z.string().min(1).max(60) }).strict();
+export const FeedbackSeenBody = z.object({ submissionId: Id }).strict();
+
+const DrillResult = z.object({ cacheId: Id, correct: z.boolean(), responseMs: z.number().min(0).max(1e9) }).strict();
+const AnchorResult = z.discriminatedUnion('type', [
+	z.object({ type: z.literal('reading'), cacheId: Id, answers: z.array(z.number().int().min(0).max(3)).max(10) }).strict(),
+	z.object({ type: z.literal('writing') }).strict(),
+	z.object({ type: z.literal('translation') }).strict()
+]);
 
 const Result = z
 	.object({
@@ -21,7 +34,9 @@ export const FinishBody = z
 	.object({
 		sessionId: z.number().int().positive(),
 		clientSessionId: z.string().regex(/^[A-Za-z0-9-]{8,64}$/),
-		results: z.array(Result).max(100)
+		results: z.array(Result).max(100),
+		drills: z.array(DrillResult).max(10).optional(),
+		anchor: AnchorResult.optional()
 	})
 	.strict();
 

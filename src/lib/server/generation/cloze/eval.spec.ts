@@ -7,6 +7,8 @@ const item = (id: number, validated: boolean): ClozeItemWithSentence => ({
 	sentenceId: id,
 	gapType: 'lexical',
 	tokenIndex: 3,
+	tokenCount: 1,
+	typingOnly: false,
 	answer: 'big',
 	options: ['small', 'big', 'loud', 'purple'],
 	answerVi: 'to',

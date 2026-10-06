@@ -56,6 +56,7 @@ describe('migrations', () => {
 			'cards',
 			'cloze_items',
 			'collocations',
+			'drill_results',
 			'generated_cache',
 			'grammar_topics',
 			'job_locks',
@@ -200,6 +201,69 @@ describe('migrations', () => {
 		}
 	});
 
+	it('rebuilds cloze_items (0007 -> 0008) under existing cards, foreign keys intact', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'silentenglish-mig8-'));
+		try {
+			const full = migrationsFolder();
+			const partial = join(dir, 'migrations');
+			mkdirSync(join(partial, 'meta'), { recursive: true });
+			const journal = JSON.parse(readFileSync(join(full, 'meta', '_journal.json'), 'utf8'));
+			journal.entries = journal.entries.filter((e: { tag: string }) => e.tag < '0008');
+			for (const entry of journal.entries) copyFileSync(join(full, `${entry.tag}.sql`), join(partial, `${entry.tag}.sql`));
+			writeFileSync(join(partial, 'meta', '_journal.json'), JSON.stringify(journal));
+
+			const db = createDb(':memory:');
+			migrate(db, partial);
+			const run = (sql: string, ...args: unknown[]) => db.$client.prepare(sql).run(...args);
+			const sentence = run("insert into sentences (en_text, vi_text, source, license_tag) values ('I like tea.', 'Tôi thích trà.', 'tatoeba', 'x')").lastInsertRowid;
+			const item = run(
+				"insert into cloze_items (sentence_id, gap_type, token_index, answer, options, level_band, rule_ok, validated, prompt_version, content_hash, created_at) values (?, 'lexical', 1, 'like', '[]', 1, 1, 1, 'v', 'h1', 0)",
+				sentence
+			).lastInsertRowid;
+			const card = run(
+				"insert into cards (kind, sentence_id, cloze_item_id, due, stability, difficulty, elapsed_days, scheduled_days, learning_steps, reps, lapses, state) values ('cloze', ?, ?, 0, 0, 0, 0, 0, 0, 0, 0, 'New')",
+				sentence,
+				item
+			).lastInsertRowid;
+			const session = run("insert into sessions (client_session_id, started_at, budget_min, shape) values ('s', 1, 8, 'write')").lastInsertRowid;
+			run("insert into writing_submissions (session_id, prompt, user_text, submitted_at) values (?, 'p', 't', 1)", session);
+
+			migrate(db, full);
+			expect(db.$client.pragma('foreign_keys', { simple: true })).toBe(1);
+			expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+			expect(db.$client.prepare('select cloze_item_id from cards where id = ?').pluck().get(card)).toBe(Number(item));
+			expect(db.$client.prepare('select token_count, typing_only from cloze_items').get()).toEqual({ token_count: 1, typing_only: 0 });
+			expect(db.$client.prepare('select session_id, task_kind, mined_count from writing_submissions').get()).toEqual({ session_id: Number(session), task_kind: 'writing', mined_count: 0 });
+			// The new gap type is allowed; the restrict on cards still holds.
+			run(
+				"insert into cloze_items (sentence_id, gap_type, token_index, answer, options, level_band, rule_ok, validated, prompt_version, content_hash, created_at) values (?, 'user_error', 1, 'like', '[]', 1, 1, 1, 'user_error', 'h2', 0)",
+				sentence
+			);
+			expect(() => run('delete from cloze_items where id = ?', item)).toThrow(/FOREIGN KEY/);
+			expect(tableNames(db).filter((t) => t.startsWith('__') && t !== '__drizzle_migrations')).toEqual([]);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it('refuses a migration that leaves a foreign key broken', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'silentenglish-migbad-'));
+		try {
+			const full = migrationsFolder();
+			const partial = join(dir, 'migrations');
+			mkdirSync(join(partial, 'meta'), { recursive: true });
+			const journal = JSON.parse(readFileSync(join(full, 'meta', '_journal.json'), 'utf8'));
+			for (const entry of journal.entries) copyFileSync(join(full, `${entry.tag}.sql`), join(partial, `${entry.tag}.sql`));
+			writeFileSync(join(partial, '9999_bad.sql'), "INSERT INTO cards (kind, cloze_item_id, due, stability, difficulty, elapsed_days, scheduled_days, learning_steps, reps, lapses, state) VALUES ('cloze', 424242, 0, 0, 0, 0, 0, 0, 0, 0, 'New');");
+			journal.entries.push({ ...journal.entries.at(-1), idx: journal.entries.length, tag: '9999_bad', when: Date.now() });
+			writeFileSync(join(partial, 'meta', '_journal.json'), JSON.stringify(journal));
+			const db = createDb(':memory:');
+			expect(() => migrate(db, partial)).toThrow(/Foreign key check failed/);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it('opens file databases with WAL and the other pragmas', () => {
 		const dir = mkdtempSync(join(tmpdir(), 'silentenglish-db-'));
 		try {
@@ -225,7 +289,8 @@ describe('schema guards', () => {
 			'llm_providers.env_key_name',
 			'llm_calls.input_tokens',
 			'llm_calls.output_tokens',
-			'cloze_items.token_index'
+			'cloze_items.token_index',
+			'cloze_items.token_count'
 		]);
 		const offending = tableNames(db).flatMap((table) =>
 			columnNames(db, table)
@@ -238,10 +303,10 @@ describe('schema guards', () => {
 			(db.$client.pragma('table_info(llm_calls)') as { name: string; type: string }[]).map((c) => [c.name, c.type.toLowerCase()])
 		);
 		expect([types.input_tokens, types.output_tokens]).toEqual(['integer', 'integer']);
-		const clozeTypes = (db.$client.pragma('table_info(cloze_items)') as { name: string; type: string }[]).find(
-			(c) => c.name === 'token_index'
+		const clozeTypes = (db.$client.pragma('table_info(cloze_items)') as { name: string; type: string }[]).filter((c) =>
+			c.name.startsWith('token_')
 		);
-		expect(clozeTypes?.type.toLowerCase()).toBe('integer');
+		expect(clozeTypes.map((c) => c.type.toLowerCase())).toEqual(['integer', 'integer']);
 	});
 
 	it('allows exactly one settings row and one profile row', () => {

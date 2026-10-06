@@ -11,7 +11,7 @@ import { hashString } from '../generation/random.ts';
 import { fillGap, tokenize, withGap } from '../generation/tokens.ts';
 import { buildQueue, createScheduler, learningDayStart, newCardFields, previewIntervals, toFsrsCard } from '../srs/index.ts';
 import type { PromptMode } from '../../session/rating.ts';
-import type { EmptyReason, GapType, SessionItem } from '../../session/types.ts';
+import type { EmptyReason, GapType, SessionItem, SessionShape } from '../../session/types.ts';
 
 export const SECONDS_PER_ITEM = 20;
 export const MAX_ITEMS = 30;
@@ -26,11 +26,24 @@ export const STOCK_NAME_SHARE = 0.3;
 /** Cards at or above this stability (days) are typed, unless New/Learning or an article gap. */
 export const TYPING_MIN_STABILITY = 7;
 
-/** About 20 s per item, capped at 30 (and at least 1). */
-export const itemCount = (budgetMin: number) => Math.min(MAX_ITEMS, Math.max(1, Math.round((budgetMin * 60) / SECONDS_PER_ITEM)));
+/** Minutes an anchor (passage, writing, translation) takes out of a Đọc or Viết budget. */
+export const ANCHOR_MINUTES = 3;
 
-/** Choice while a card is new, learning or weak (stability < 7 days); typing after. Articles: always choice. */
-export function promptMode(card: Pick<CardRow, 'state' | 'stability'>, gapType: GapType): PromptMode {
+/**
+ * Review items for a budget: about 20 s each, capped at 30 (at least 1). Đọc and Viết keep about
+ * 3 minutes for their anchor: round((budget − 3) × 60 / 20).
+ */
+export function itemCount(budgetMin: number, shape: SessionShape = 'quick'): number {
+	const minutes = shape === 'quick' ? budgetMin : budgetMin - ANCHOR_MINUTES;
+	return Math.min(MAX_ITEMS, Math.max(1, Math.round((minutes * 60) / SECONDS_PER_ITEM)));
+}
+
+/**
+ * Choice while a card is new, learning or weak (stability < 7 days); typing after. Articles: always
+ * choice. A mined error without enough distractors: always typing.
+ */
+export function promptMode(card: Pick<CardRow, 'state' | 'stability'>, gapType: GapType, typingOnly = false): PromptMode {
+	if (typingOnly) return 'typing';
 	if (gapType === 'article') return 'choice';
 	if (card.state === 'New' || card.state === 'Learning' || card.stability < TYPING_MIN_STABILITY) return 'choice';
 	return 'typing';
@@ -168,21 +181,24 @@ export interface ComposedSession {
 }
 
 function toItem(card: CardRow, item: SessionClozeItem, now: Date, scheduler: FSRS): SessionItem {
-	const mode = promptMode(card, item.gapType);
+	const mode = promptMode(card, item.gapType, item.typingOnly);
 	const tokens = tokenize(item.enText);
-	const token = tokens[item.tokenIndex];
+	const first = tokens[item.tokenIndex];
+	const last = tokens[item.tokenIndex + item.tokenCount - 1];
 	const intervals = Object.fromEntries(previewIntervals(card, now, scheduler).map((p) => [p.rating, p.interval])) as SessionItem['intervals'];
+	const single = item.tokenCount === 1;
 	return {
 		cardId: card.id,
 		mode,
 		gapType: item.gapType,
 		isNew: card.state === 'New',
-		sentenceWithGap: withGap(item.enText, tokens, item.tokenIndex),
-		before: item.enText.slice(0, token.start),
-		after: item.enText.slice(token.end),
+		isMined: item.gapType === 'user_error',
+		sentenceWithGap: single ? withGap(item.enText, tokens, item.tokenIndex) : `${item.enText.slice(0, first.start)}___${item.enText.slice(last.end)}`,
+		before: item.enText.slice(0, first.start),
+		after: item.enText.slice(last.end),
 		...(mode === 'choice' ? { options: item.options } : {}),
 		answer: item.answer,
-		filled: fillGap(item.enText, tokens, item.tokenIndex, item.answer),
+		filled: single ? fillGap(item.enText, tokens, item.tokenIndex, item.answer) : item.enText,
 		viTranslation: item.viText,
 		answerVi: item.answerVi,
 		levelBand: item.levelBand,
@@ -195,8 +211,8 @@ function toItem(card: CardRow, item: SessionClozeItem, now: Date, scheduler: FSR
  * first) with new cards interleaved, within the daily new-card limit and the stock-name cap. New
  * cards are created here (state New); an abandoned session simply leaves them New.
  */
-export function composeSession(db: DbOrTx, now: Date, options: { budgetMin: number }): ComposedSession {
-	const count = itemCount(options.budgetMin);
+export function composeSession(db: DbOrTx, now: Date, options: { budgetMin: number; shape?: SessionShape }): ComposedSession {
+	const count = itemCount(options.budgetMin, options.shape);
 	const settings = settingsRepo(db).get();
 	const scheduler = createScheduler(settings);
 	const cards = cardsRepo(db);
@@ -210,11 +226,15 @@ export function composeSession(db: DbOrTx, now: Date, options: { budgetMin: numb
 	const withItem = (c: CardRow) => (details.has(c.clozeItemId!) ? [entry(c, details.get(c.clozeItemId!)!)] : []);
 	const due = cloze.filter((c) => c.state !== 'New').flatMap(withItem);
 	const existingNew = cloze.filter((c) => c.state === 'New').flatMap(withItem);
+	// The learner's own mined errors: new cards outside the daily limit, served right after the opening.
+	const minedCards = cards.newMinedCards(count);
+	for (const [id, item] of clozeItems.forSession(minedCards.map((c) => c.clozeItemId!)).map((i) => [i.id, i] as const)) details.set(id, item);
+	const mined = minedCards.flatMap(withItem);
 
 	// Opening: the most retrievable due cards; then the rest, most overdue first (queue order).
 	const retrievability = (c: CardRow) => scheduler.get_retrievability(toFsrsCard(c), now, false);
 	const opening = [...due].sort((a, b) => retrievability(b.card!) - retrievability(a.card!)).slice(0, OPENING_REVIEWS);
-	const reviews = [...opening, ...due.filter((e) => !opening.includes(e))];
+	const reviews = [...opening, ...mined, ...due.filter((e) => !opening.includes(e))];
 
 	// Stock-name budget for the session (Tom and Mary recur in Tatoeba).
 	const allowedStock = Math.floor(STOCK_NAME_SHARE * count);
@@ -263,7 +283,7 @@ export function composeSession(db: DbOrTx, now: Date, options: { budgetMin: numb
 			if (card === null) continue;
 			created++;
 		}
-		cards.setPromptMode(card.id, promptMode(card, e.gapType));
+		cards.setPromptMode(card.id, promptMode(card, e.gapType, e.item.typingOnly));
 		items.push(toItem(card, e.item, now, scheduler));
 	}
 	if (items.length > 0) return { items, created };

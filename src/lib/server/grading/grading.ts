@@ -1,7 +1,7 @@
 // Live grading services for Phase 9: writing feedback and translation checks. Never cached.
 import type { FEEDBACK_MODES } from '../db/schema.ts';
 import { type LlmDeps, defaultLlmDeps, generateStructured } from '../llm/client.ts';
-import type { TranslationFeedback, WritingFeedback } from '../llm/prompts/feedback.ts';
+import type { BaseFeedback, TranslationFeedback, WritingFeedback } from '../llm/prompts/feedback.ts';
 import * as translationPrompt from '../llm/prompts/grade-translation.ts';
 import * as writingPrompt from '../llm/prompts/grade-writing.ts';
 import type { Usage } from '../llm/wire.ts';
@@ -9,15 +9,15 @@ import type { Usage } from '../llm/wire.ts';
 export type FeedbackMode = (typeof FEEDBACK_MODES)[number];
 
 /** What the UI shows: in indirect mode the corrected text is withheld, so the learner self-corrects. */
-export type FeedbackDisplay<F extends WritingFeedback> = Omit<F, 'corrected_text'> & { corrected_text?: string };
+export type FeedbackDisplay<F extends BaseFeedback> = Omit<F, 'corrected_text'> & { corrected_text?: string };
 
-export function toDisplay<F extends WritingFeedback>(feedback: F, mode: FeedbackMode): FeedbackDisplay<F> {
+export function toDisplay<F extends BaseFeedback>(feedback: F, mode: FeedbackMode): FeedbackDisplay<F> {
 	if (mode === 'direct') return feedback;
 	const { corrected_text: _hidden, ...rest } = feedback;
 	return rest;
 }
 
-export interface Graded<F extends WritingFeedback> {
+export interface Graded<F extends BaseFeedback> {
 	/** Everything the model returned (after validation and the invented-error guard). */
 	feedback: F;
 	/** Errors dropped by the guard: their "original" is not in the learner's text, or changes nothing. */
@@ -33,7 +33,7 @@ const norm = (text: string) => text.toLowerCase().replace(/[‘’]/g, "'").repl
  * Drop errors that cannot be real: the quoted original is not in the learner's text, or the
  * correction equals it. The prompt forbids inventing errors; this catches the ones that slip through.
  */
-export function guardErrors<F extends WritingFeedback>(feedback: F, learnerText: string): { feedback: F; dropped: number } {
+export function guardErrors<F extends BaseFeedback>(feedback: F, learnerText: string): { feedback: F; dropped: number } {
 	const text = norm(learnerText);
 	const errors = feedback.errors.filter((e) => norm(e.original) !== '' && text.includes(norm(e.original)) && norm(e.original) !== norm(e.correction));
 	return { feedback: { ...feedback, errors }, dropped: feedback.errors.length - errors.length };

@@ -11,7 +11,8 @@ import { tokenize } from '../generation/tokens.ts';
 import type { WritingPrompt } from '../generation/writing-prompts.ts';
 import { combine } from './combine.ts';
 import { PART_B_ITEMS, nextBand, updateTheta } from './elo.ts';
-import { type GradedWriting, applyResultToProfile, applyWritingGrade, buildResult } from './results.ts';
+import { applyWritingGrade } from '../grading/apply.ts';
+import { type GradedWriting, applyResultToProfile, buildResult } from './results.ts';
 import {
 	BLOCK_SIZE,
 	type Block,

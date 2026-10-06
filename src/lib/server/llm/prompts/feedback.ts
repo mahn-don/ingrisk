@@ -15,7 +15,8 @@ export const FeedbackError = z
 
 const Score = z.number().int().min(1).max(5);
 
-export const WritingFeedback = z
+/** What every grading returns (writing and translation alike). */
+export const BaseFeedback = z
 	.object({
 		corrected_text: z.string(),
 		// Ranked by importance. The provider schema carries no size limit (Anthropic rejects one);
@@ -28,9 +29,16 @@ export const WritingFeedback = z
 		scores: z.object({ range: Score, accuracy: Score, coherence: Score }).strict()
 	})
 	.strict();
+export type BaseFeedback = z.output<typeof BaseFeedback>;
+
+/** Writing adds task relevance (Phase 9b): an off-topic text keeps its CEFR out of every estimate. */
+export const WritingFeedback = BaseFeedback.extend({
+	on_topic: z.boolean().describe('Whether the text responds to the task'),
+	task_note_vi: z.string().describe('If off topic: one short Vietnamese sentence saying what the task asked; else empty')
+}).strict();
 export type WritingFeedback = z.output<typeof WritingFeedback>;
 
-export const TranslationFeedback = WritingFeedback.extend({ meaning_ok: z.boolean() }).strict();
+export const TranslationFeedback = BaseFeedback.extend({ meaning_ok: z.boolean() }).strict();
 export type TranslationFeedback = z.output<typeof TranslationFeedback>;
 
 export const TOPIC_CODE_GUIDE = `Error codes (use exactly one per error):
@@ -46,3 +54,8 @@ export const FEEDBACK_RULES = `Rules for errors:
 - original: the exact words from the learner's text (copy them); correction: what they should be.
 - explanation_vi: one or two short sentences in plain Vietnamese, suited to the learner's level, saying why it is wrong and the rule.
 - corrected_text: the learner's text with all errors fixed (also those not listed), changing as little as possible.`;
+
+export const TASK_RELEVANCE = `Task relevance:
+- on_topic: true if the text responds to the task (task_vi), even briefly or imperfectly; false if it is about something else or ignores the task.
+- task_note_vi: when on_topic is false, one short, kind Vietnamese sentence saying what the task asked for; when on_topic is true, an empty string.
+- Grade the English itself (errors, cefr_estimate) the same way either way.`;

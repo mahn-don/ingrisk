@@ -63,7 +63,7 @@ deploy/                  systemd unit, Litestream config, deploy script, crontab
 
 Unit tests sit next to the code as `*.spec.ts` (in `src/` and `tool/`); e2e tests as `*.e2e.ts`
 (Playwright starts five preview servers: main, no password hash, an isolated rate-limit one,
-placement with a seeded database and `LLM_CANNED=1`, and session with a seeded database).
+placement and session, each with a seeded database and `LLM_CANNED=1`).
 SvelteKit 3 renamed `$app/environment` to `$app/env`.
 
 ## Commands
@@ -88,7 +88,7 @@ SvelteKit 3 renamed `$app/environment` to `$app/env`.
 | `npm run llm:usage -- --days 7` | LLM calls and tokens per day × purpose × model |
 | `npm run auth:hash` | Prompt for the login password twice (hidden) and print `APP_PASSWORD_HASH` |
 | `npm run screenshots` | Login, Home, Stats, Settings, `/dev/components`, the placement test and a session at 390×844, light + dark, into `tmp/screens/` |
-| `npm run test:seed -- --db PATH` | A throwaway test database: content plus a cloze pool built with the canned LLM |
+| `npm run test:seed -- --db PATH [--anchors]` | A throwaway test database: content, a cloze pool (and passages, drills) built with the canned LLM |
 | `npm run db:generate` | Generate a SQL migration from `src/lib/server/db/schema.ts` (commit it) |
 | `npm run db:migrate` | Apply pending migrations to `DATABASE_PATH` (default `data/app.db`) |
 | `npm run db:studio` | Browse the database with Drizzle Studio |
@@ -119,7 +119,9 @@ SvelteKit 3 renamed `$app/environment` to `$app/env`.
 ## Database
 
 - Change the schema in `schema.ts`, then `npm run db:generate` and commit the new migration.
-  Never edit an applied migration. Migrations run automatically at server start.
+  Never edit an applied migration. Migrations run automatically at server start, with foreign
+  keys off (a rebuild can drop a referenced table) and a `foreign_key_check` afterwards. Review
+  drizzle-kit's rebuilds: its `INSERT … SELECT` copies columns the old table lacks.
 - Repositories take the db as a parameter; tests use `createTestDb()` (in-memory, migrated).
 
 ## Spaced repetition
